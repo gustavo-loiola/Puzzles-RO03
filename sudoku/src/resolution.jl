@@ -17,7 +17,7 @@ Return
 - x: 3-dimensional variables array such that x[i, j, k] = 1 if cell (i, j) has value k
 - getsolvetime(m): resolution time in seconds
 """
-function cplexSolve(t::Matrix{Int, 2})
+function cplexSolve(t::Matrix{Int})
 
     n = size(t, 1)
 

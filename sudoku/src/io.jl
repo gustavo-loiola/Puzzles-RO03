@@ -35,7 +35,7 @@ function readInputFile(inputFile::String)
     close(datafile)
     
     n = length(split(data[1], ","))
-    t = Vector{Int64}(undef, n, n)
+    t = Matrix{Int64}(undef, n, n)
 
     lineNb = 1
 
