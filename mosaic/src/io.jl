@@ -1,31 +1,182 @@
-# This file contains functions related to reading, writing and displaying a grid and experimental results
+# This file contains functions related to reading, writing and displaying a Mosaic grid and experimental results
 
 using JuMP
 using Plots
 import GR
+
+TOL = 0.00001
 
 """
 Read an instance from an input file
 
 - Argument:
 inputFile: path of the input file
+
+- Format:
+  First line: "n m" (grid dimensions)
+  Then a "# grid" header followed by n rows of m space-separated values (. for empty, integer for clue)
+  Optionally a "# solution" header followed by n rows of m space-separated values (0/1)
+
+Returns a Tuple containing:
+1. An n x m matrix of Integers (the puzzle, -1 for empty)
+2. An n x m matrix of Integers (the solution, 1 for black, 0 for white. -1 if no solution provided)
 """
 function readInputFile(inputFile::String)
-
-    # Open the input file
-    datafile = open(inputFile)
-
-    data = readlines(datafile)
-    close(datafile)
-
-    # For each line of the input file
-    for line in data
-
-        # TODO
-        println("In file io.jl, in method readInputFile(), TODO: read a line of the input file")
-
+    # Open the input file and read all lines
+    lines = readlines(inputFile)
+    
+    # The first line contains the dimensions (e.g., "5 5")
+    dims = split(lines[1])
+    n = parse(Int, dims[1])
+    m = parse(Int, dims[2])
+    
+    # Initialize empty matrices of size n x m filled with -1
+    grid = fill(-1, n, m)
+    solution = fill(-1, n, m)
+    
+    reading_solution = false
+    row_idx = 1
+    
+    # Loop through the remaining lines to fill the grid and solution
+    for i in 2:length(lines)
+        line = strip(lines[i]) # Remove leading/trailing whitespace
+        
+        # Skip empty lines
+        if isempty(line)
+            continue
+        end
+        
+        # Check for section headers
+        if startswith(line, "#")
+            if occursin("solution", lowercase(line))
+                reading_solution = true
+                row_idx = 1 # Reset row counter for the solution matrix
+            end
+            continue # Move to the next line
+        end
+        
+        # Parse the actual grid or solution rows
+        row_str = split(line)
+        if !reading_solution
+            # We are reading the initial puzzle
+            for j in 1:min(m, length(row_str))
+                if row_str[j] != "."
+                    grid[row_idx, j] = parse(Int, row_str[j])
+                end
+            end
+        else
+            # We are reading the solution
+            for j in 1:min(m, length(row_str))
+                solution[row_idx, j] = parse(Int, row_str[j])
+            end
+        end
+        
+        row_idx += 1
     end
+    
+    return grid, solution 
+end
 
+
+"""
+Displays the unsolved grid in the console.
+"""
+function displayGrid(grid::Matrix{Int})
+    n, m = size(grid)
+    println("┌", "───" ^ m, "┐")
+    for i in 1:n
+        print("│")
+        for j in 1:m
+            if grid[i, j] == -1
+                print(" . ")
+            else
+                print(" $(grid[i, j]) ")
+            end
+        end
+        println("│")
+    end
+    println("└", "───" ^ m, "┘")
+end
+
+
+"""
+Displays the solved solution in the console.
+
+Argument:
+- solution: an n x m matrix with values 0 (white) or 1 (black)
+"""
+function displaySolution(solution::Matrix{Int})
+    n, m = size(solution)
+    println("┌", "───" ^ m, "┐")
+    for i in 1:n
+        print("│")
+        for j in 1:m
+            if solution[i, j] == 1
+                print(" ■ ") # Black square
+            elseif solution[i, j] == 0
+                print(" □ ") # White square
+            else
+                print(" ? ") # Unknown/Error
+            end
+        end
+        println("│")
+    end
+    println("└", "───" ^ m, "┘")
+end
+
+
+"""
+Save a Mosaic instance to a text file
+
+Arguments:
+- grid: n x m matrix with clue values (-1 for empty cells)
+- outputFile: path of the output file
+"""
+function saveInstance(grid::Matrix{Int}, outputFile::String)
+    n, m = size(grid)
+    writer = open(outputFile, "w")
+    
+    println(writer, "$n $m")
+    println(writer, "# grid")
+    
+    for i in 1:n
+        row_parts = String[]
+        for j in 1:m
+            if grid[i, j] == -1
+                push!(row_parts, ".")
+            else
+                push!(row_parts, string(grid[i, j]))
+            end
+        end
+        println(writer, join(row_parts, " "))
+    end
+    
+    close(writer)
+end
+
+
+"""
+Write a CPLEX solution to an output stream
+
+Arguments:
+- fout: the output stream (usually an output file)
+- solution: an n x m matrix with values 0 (white) or 1 (black)
+"""
+function writeSolution(fout::IOStream, solution::Matrix{Int})
+    n, m = size(solution)
+    println(fout, "solution = [")
+    for i in 1:n
+        print(fout, "[ ")
+        for j in 1:m
+            print(fout, string(solution[i, j]) * " ")
+        end
+        endLine = "]"
+        if i != n
+            endLine *= ";"
+        end
+        println(fout, endLine)
+    end
+    println(fout, "]")
 end
 
 
@@ -70,6 +221,11 @@ function performanceDiagram(outputFile::String)
                 maxSize = folderSize
             end
         end
+    end
+
+    if subfolderCount == 0 || maxSize == 0
+        println("No results found in $resultFolder")
+        return
     end
 
     # Array that will contain the resolution times (one line for each subfolder)
@@ -260,7 +416,7 @@ function resultsArray(outputFile::String)
     end
 
     # Only keep one string for each instance solved
-    unique(solvedInstances)
+    solvedInstances = unique(solvedInstances)
 
     # For each resolution method, add two columns in the array
     for folder in folderName
@@ -339,4 +495,4 @@ function resultsArray(outputFile::String)
 
     close(fout)
     
-end 
+end
