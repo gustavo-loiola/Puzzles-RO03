@@ -254,7 +254,7 @@ function performanceDiagram(outputFile::String)
             for resultFile in filter(x->occursin(".txt", x), readdir(path))
 
                 fileCount += 1
-                include(path * "/" * resultFile)
+                include(abspath(path * "/" * resultFile))
 
                 if isOptimal
                     results[folderCount, fileCount] = solveTime
@@ -469,7 +469,7 @@ function resultsArray(outputFile::String)
             # If the instance has been solved by this method
             if isfile(path)
 
-                include(path)
+                include(abspath(path))
 
                 println(fout, " & ", round(solveTime, digits=2), " & ")
 
