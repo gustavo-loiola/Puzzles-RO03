@@ -1,31 +1,193 @@
-# This file contains functions related to reading, writing and displaying a grid and experimental results
+# This file contains functions related to reading, writing and displaying a Range grid and experimental results
 
 using JuMP
 using Plots
 import GR
 
+TOL = 0.00001
+
 """
-Read an instance from an input file
+Read a Range instance from an input file
 
 - Argument:
 inputFile: path of the input file
+
+- Format:
+  First line: "m n" (grid dimensions: m columns, n rows)
+  Then a "# grid" header followed by n rows of m space-separated values (. for empty, integer for clue)
+  Optionally a "# solution" header followed by n rows of m space-separated values (0=white, 1=black)
+
+Returns a Tuple containing:
+1. An n x m matrix of Integers (the puzzle, -1 for empty, positive integer for clue)
+2. An n x m matrix of Integers (the expected solution, 1=black, 0=white, -1 if no solution provided)
 """
 function readInputFile(inputFile::String)
-
-    # Open the input file
-    datafile = open(inputFile)
-
-    data = readlines(datafile)
-    close(datafile)
-
-    # For each line of the input file
-    for line in data
-
-        # TODO
-        println("In file io.jl, in method readInputFile(), TODO: read a line of the input file")
-
+    # Read all lines
+    lines = readlines(inputFile)
+    
+    # First line: dimensions
+    dims = split(lines[1])
+    m = parse(Int, dims[1])  # number of columns
+    n = parse(Int, dims[2])  # number of rows
+    
+    # Initialize matrices
+    grid = fill(-1, n, m)
+    solution = fill(-1, n, m)
+    
+    reading_solution = false
+    row_idx = 1
+    
+    for i in 2:length(lines)
+        line = strip(lines[i])
+        
+        # Skip empty lines
+        if isempty(line)
+            continue
+        end
+        
+        # Check for section headers
+        if startswith(line, "#")
+            if occursin("solution", lowercase(line))
+                reading_solution = true
+                row_idx = 1
+            end
+            continue
+        end
+        
+        row_str = split(line)
+        if !reading_solution
+            for j in 1:min(m, length(row_str))
+                if row_str[j] != "."
+                    grid[row_idx, j] = parse(Int, row_str[j])
+                end
+            end
+        else
+            for j in 1:min(m, length(row_str))
+                solution[row_idx, j] = parse(Int, row_str[j])
+            end
+        end
+        
+        row_idx += 1
     end
+    
+    return grid, solution
+end
 
+
+"""
+Display the Range grid in the console.
+Clue cells show their number, empty cells show a dot.
+"""
+function displayGrid(grid::Matrix{Int})
+    n, m = size(grid)
+    # Determine max width for formatting
+    maxVal = maximum(x -> x == -1 ? 0 : x, grid)
+    w = max(2, length(string(maxVal)) + 1)
+    
+    println("┌", ("─" ^ w) ^ m, "─┐")
+    for i in 1:n
+        print("│")
+        for j in 1:m
+            if grid[i, j] == -1
+                print(lpad(".", w))
+            else
+                print(lpad(string(grid[i, j]), w))
+            end
+        end
+        println(" │")
+    end
+    println("└", ("─" ^ w) ^ m, "─┘")
+end
+
+
+"""
+Display the solved solution in the console.
+Black cells = ■, White cells = □, White cells with a clue show the clue number.
+
+Arguments:
+- solution: n x m matrix (0=white, 1=black)
+- grid: (optional) the original grid to overlay clue numbers
+"""
+function displaySolution(solution::Matrix{Int}; grid::Union{Matrix{Int}, Nothing}=nothing)
+    n, m = size(solution)
+    
+    if grid !== nothing
+        maxVal = maximum(x -> x == -1 ? 0 : x, grid)
+        w = max(2, length(string(maxVal)) + 1)
+    else
+        w = 2
+    end
+    
+    println("┌", ("─" ^ w) ^ m, "─┐")
+    for i in 1:n
+        print("│")
+        for j in 1:m
+            if solution[i, j] == 1
+                print(lpad("■", w))
+            elseif grid !== nothing && grid[i, j] != -1
+                print(lpad(string(grid[i, j]), w))
+            else
+                print(lpad("□", w))
+            end
+        end
+        println(" │")
+    end
+    println("└", ("─" ^ w) ^ m, "─┘")
+end
+
+
+"""
+Save a Range instance to a text file
+
+Arguments:
+- grid: n x m matrix with clue values (-1 for empty cells)
+- outputFile: path of the output file
+"""
+function saveInstance(grid::Matrix{Int}, outputFile::String)
+    n, m = size(grid)
+    writer = open(outputFile, "w")
+    
+    println(writer, "$m $n")
+    println(writer, "# grid")
+    
+    for i in 1:n
+        row_parts = String[]
+        for j in 1:m
+            if grid[i, j] == -1
+                push!(row_parts, ".")
+            else
+                push!(row_parts, string(grid[i, j]))
+            end
+        end
+        println(writer, join(row_parts, " "))
+    end
+    
+    close(writer)
+end
+
+
+"""
+Write a solution to an output stream
+
+Arguments:
+- fout: the output stream
+- solution: n x m matrix (0=white, 1=black)
+"""
+function writeSolution(fout::IOStream, solution::Matrix{Int})
+    n, m = size(solution)
+    println(fout, "solution = [")
+    for i in 1:n
+        print(fout, "[ ")
+        for j in 1:m
+            print(fout, string(solution[i, j]) * " ")
+        end
+        endLine = "]"
+        if i != n
+            endLine *= ";"
+        end
+        println(fout, endLine)
+    end
+    println(fout, "]")
 end
 
 
@@ -72,6 +234,11 @@ function performanceDiagram(outputFile::String)
         end
     end
 
+    if subfolderCount == 0 || maxSize == 0
+        println("No results found in $resultFolder")
+        return
+    end
+
     # Array that will contain the resolution times (one line for each subfolder)
     results = Array{Float64}(undef, subfolderCount, maxSize)
 
@@ -98,7 +265,7 @@ function performanceDiagram(outputFile::String)
             for resultFile in filter(x->occursin(".txt", x), readdir(path))
 
                 fileCount += 1
-                include(path * "/" * resultFile)
+                include(abspath(path * "/" * resultFile))
 
                 if isOptimal
                     results[folderCount, fileCount] = solveTime
@@ -260,7 +427,7 @@ function resultsArray(outputFile::String)
     end
 
     # Only keep one string for each instance solved
-    unique(solvedInstances)
+    solvedInstances = unique(solvedInstances)
 
     # For each resolution method, add two columns in the array
     for folder in folderName
@@ -313,9 +480,9 @@ function resultsArray(outputFile::String)
             # If the instance has been solved by this method
             if isfile(path)
 
-                include(path)
+                include(abspath(path))
 
-                println(fout, " & ", round(solveTime, digits=2), " & ")
+                println(fout, " & ", round(solveTime, digits=4), " & ")
 
                 if isOptimal
                     println(fout, "\$\\times\$")
@@ -339,4 +506,4 @@ function resultsArray(outputFile::String)
 
     close(fout)
     
-end 
+end
