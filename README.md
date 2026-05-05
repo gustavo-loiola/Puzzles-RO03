@@ -21,8 +21,7 @@ A complete **Sudoku** solver is also provided as a reference implementation by t
 ├── mosaic/             # Solver for the Mosaic puzzle
 ├── range/              # Solver for the Range puzzle
 ├── sudoku/             # Reference Sudoku solver (provided by instructor)
-├── projet_sujet.md     # Full assignment specification
-├── Projet_sujet.pdf    # Assignment specification (PDF)
+├── Projet_sujet.pdf    # Assignment specification
 └── README.md           # This file
 ```
 
