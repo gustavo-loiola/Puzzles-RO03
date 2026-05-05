@@ -31,6 +31,7 @@ function cplexSolve(grid::Matrix{Int})
 
     # Suppress CPLEX output for cleaner console
     set_silent(model)
+    set_time_limit_sec(model, 60.0)  # 60s time limit per instance
 
     # Decision variables: x[i,j] = 1 if cell (i,j) is black
     @variable(model, x[1:n, 1:m], Bin)
@@ -282,8 +283,8 @@ function solveDataSet()
                     resolutionTime = 0.0
                     sol = nothing
                     
-                    # While the grid is not solved and less than 100 seconds are elapsed
-                    while !isOptimal && resolutionTime < 100
+                    # While the grid is not solved and less than 10 seconds are elapsed
+                    while !isOptimal && resolutionTime < 10
                         
                         # Solve it and get the results
                         isOptimal, sol = heuristicSolve(grid)
