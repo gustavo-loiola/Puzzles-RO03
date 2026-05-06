@@ -1,0 +1,220 @@
+\section{Range}
+\label{sec:range}
+
+\subsection{Puzzle Description}
+
+Range is played on an $n \times m$ grid. Some cells contain positive integer clues. The player must colour cells black or white (leaving clue cells white) so that all four rules hold simultaneously:
+
+\begin{enumerate}
+  \item \textbf{Clue cells are white.} No numbered cell may be coloured black.
+  \item \textbf{No two adjacent black cells.} Black cells cannot share a horizontal or vertical edge.
+  \item \textbf{White connectivity.} All white cells must form a single connected region.
+  \item \textbf{Visibility.} Each clue value $v_{r,c}$ equals the total number of white cells visible from $(r,c)$ in the four cardinal directions, counting the clue cell itself. Visibility in a direction stops at the first black cell or the grid boundary.
+\end{enumerate}
+
+Rules 3 and 4 together imply no clue can equal 1 (a cell seeing only itself would be surrounded by black, isolating it). Range is rated difficulty 5 in Simon Tatham's collection, primarily because Rule 3 (global white connectivity) requires a global constraint that cannot be encoded with a polynomial number of local inequalities without auxiliary variables.
+
+\subsection{ILP Formulation — Shared Constraints}
+
+\subsubsection{Sets, Indices, and Decision Variables}
+
+Let $\mathcal{C} = \{(r,c) \mid \text{cell } (r,c) \text{ has a clue}\}$ with clue value $v_{r,c}$. Let $\mathcal{N}(i,j)$ denote the set of 4-adjacent neighbours of $(i,j)$ within the grid. Fix any source cell $s = (s_r, s_c) \in \mathcal{C}$ (the first clue cell encountered in row-major order).
+
+Primary binary variables:
+\[
+  b_{i,j} \in \{0,1\} \qquad \forall\, (i,j) \in [n] \times [m]
+\]
+where $b_{i,j} = 1$ if cell $(i,j)$ is black.
+
+\subsubsection{Objective}
+
+\[ \min\; 0 \]
+
+\subsubsection{Rule 1 — Clue Cells are White}
+
+\[
+  b_{r,c} = 0 \qquad \forall\, (r,c) \in \mathcal{C}
+  \tag{R1}
+\]
+
+\subsubsection{Rule 2 — No Adjacent Black Cells}
+
+\[
+  b_{i,j} + b_{i,j+1} \leq 1 \qquad \forall\, i \in [n],\; j \in [m-1]
+\]
+\[
+  b_{i,j} + b_{i+1,j} \leq 1 \qquad \forall\, i \in [n-1],\; j \in [m]
+  \tag{R2}
+\]
+
+\subsubsection{Rule 4 — Visibility Constraints}
+
+For each clue cell $(r,c) \in \mathcal{C}$, we introduce auxiliary binary variables to model line-of-sight visibility. Taking the \emph{right} direction as representative (analogous variables are defined for left, up, and down):
+
+\[
+  \text{vis}^{R}_{r,c,d} \in \{0,1\}, \qquad d = 1, \ldots, m - c
+\]
+
+where $\text{vis}^{R}_{r,c,d} = 1$ iff cell $(r, c+d)$ is visible from $(r,c)$ looking right, i.e., all cells $(r, c+1), \ldots, (r, c+d)$ are white.
+
+This is linearised with two families of constraints:
+\begin{align}
+  \text{vis}^{R}_{r,c,d} &\leq 1 - b_{r,\, c+k} \qquad \forall\, k = 1, \ldots, d \tag{R4a}\\
+  \text{vis}^{R}_{r,c,d} &\geq 1 - \sum_{k=1}^{d} b_{r,\, c+k} \tag{R4b}
+\end{align}
+
+Constraint (R4a) ensures that if any cell on the ray is black, the visibility variable is forced to 0. Constraint (R4b) ensures that if all cells are white (the sum is 0), the variable is forced to 1 — capturing the ``visible if and only if all intermediate cells are white'' semantics. Symmetric constraints are added for the left ($b_{r,c-k}$), down ($b_{r+k,c}$), and up ($b_{r-k,c}$) directions.
+
+The total visibility equation (counting the clue cell itself) must equal the clue value:
+
+\begin{equation}
+  1 + \sum_{d=1}^{m-c} \text{vis}^{R}_{r,c,d}
+    + \sum_{d=1}^{c-1} \text{vis}^{L}_{r,c,d}
+    + \sum_{d=1}^{n-r} \text{vis}^{D}_{r,c,d}
+    + \sum_{d=1}^{r-1} \text{vis}^{U}_{r,c,d}
+  = v_{r,c}
+  \tag{R4c}
+\end{equation}
+
+\subsection{Connectivity Strategy 1: Single-Commodity Network Flow}
+\label{sec:flow}
+
+\subsubsection{Formulation}
+
+White connectivity (Rule 3) is modelled by routing flow from the fixed source $s$ to every other white cell. Each white cell must receive exactly one unit of flow; black cells cannot carry flow.
+
+We introduce continuous directed flow variables on every oriented edge of the grid:
+\[
+  f_{(i,j) \to (i',j')} \geq 0 \qquad \forall\, (i',j') \in \mathcal{N}(i,j)
+\]
+
+\textbf{Flow balance at source $s$:}
+\[
+  \sum_{(i',j') \in \mathcal{N}(s)} f_{s \to (i',j')} - \sum_{(i',j') \in \mathcal{N}(s)} f_{(i',j') \to s}
+  = \sum_{(i,j) \neq s} (1 - b_{i,j})
+  \tag{R3a}
+\]
+
+\textbf{Flow balance at every other cell $(i,j) \neq s$:}
+\[
+  \sum_{(i',j') \in \mathcal{N}(i,j)} f_{(i',j') \to (i,j)} - \sum_{(i',j') \in \mathcal{N}(i,j)} f_{(i,j) \to (i',j')}
+  = 1 - b_{i,j}
+  \tag{R3b}
+\]
+
+White cells consume one unit of flow; black cells consume zero.
+
+\textbf{Flow capacity — restricted to white edges:}
+\[
+  f_{(i,j) \to (i',j')} \leq M \cdot (1 - b_{i,j}), \quad
+  f_{(i,j) \to (i',j')} \leq M \cdot (1 - b_{i',j'})
+  \tag{R3c}
+\]
+
+where $M = n \times m$ is a valid upper bound on the total number of white cells.
+
+This formulation adds $O(nm)$ continuous variables and $O(nm)$ constraints, but introduces Big-M coefficients that weaken the LP relaxation.
+
+\subsection{Connectivity Strategy 2: Lazy-Constraint Callbacks}
+\label{sec:callback}
+
+\subsubsection{Motivation}
+
+The flow model is complete but computationally costly: the Big-M coefficients cause a weak LP relaxation, slowing CPLEX's branch-and-bound tree. An alternative is to omit connectivity constraints from the initial model and enforce them \emph{dynamically} via lazy constraints: each time CPLEX produces an integer-feasible candidate, we check connectivity and, if violated, add a cutting plane to forbid the infeasible configuration.
+
+\subsubsection{Separator Inequality}
+
+Let $\hat{b}$ be an integer candidate. Run a BFS from source $s$ through white cells ($\hat{b}_{i,j} = 0$). If a set $S$ of white cells is not reachable from $s$, it forms a disconnected component. Define its outer neighbourhood:
+\[
+  N(S) = \bigl\{(i,j) \notin S \;\big|\; \exists\, (i',j') \in S : (i',j') \in \mathcal{N}(i,j) \bigr\}
+\]
+
+In $\hat{b}$, every cell in $S$ is white ($\hat{b} = 0$) and every cell in $N(S)$ is black ($\hat{b} = 1$). The \emph{separator cut} forbids this exact pattern:
+\begin{equation}
+  \sum_{(i,j) \in S} b_{i,j} \;+\; \sum_{(i,j) \in N(S)} (1 - b_{i,j}) \;\geq\; 1
+  \label{eq:separator}
+\end{equation}
+
+This forces the next solution to either colour at least one cell of $S$ black (eliminating the isolated component) or colour at least one boundary cell of $N(S)$ white (connecting $S$ to the rest of the grid).
+
+\subsubsection{Callback Algorithm}
+
+The callback is invoked by CPLEX at every integer node:
+
+\begin{enumerate}
+  \item Read the candidate values $\hat{b}_{i,j}$ for all cells.
+  \item BFS from $s$ through white cells; compute the reachable set $A$.
+  \item For every white cell $w \notin A$ not yet in a found component, BFS to enumerate its full component $S$.
+  \item Compute $N(S)$ and submit the separator cut~\eqref{eq:separator} via \texttt{MOI.LazyConstraint}.
+  \item If no cut is submitted, the candidate is connected and accepted.
+\end{enumerate}
+
+All disconnected components are cut in a single callback invocation, minimising round-trips to the solver. The callback is registered with \texttt{MOI.LazyConstraintCallback()}.
+
+\subsubsection{Advantages over the Flow Model}
+
+The callback model has no additional variables and no Big-M coefficients, yielding a tighter LP relaxation. Cuts are generated only when needed, keeping the model compact throughout branch-and-bound. In practice, Range instances are sparse enough that very few cuts are added before convergence.
+
+\subsection{Instance Generation}
+
+The Range generator must produce valid puzzle instances that satisfy all four rules by construction:
+
+\begin{enumerate}
+  \item \textbf{Place black cells.} Shuffle all grid positions. For each position, place a black cell with probability $\sim 0.15$–$0.25$, skipping if a 4-adjacent cell is already black (enforcing Rule 2).
+  \item \textbf{Check white connectivity.} Run a BFS from any white cell. If the white region is not connected (Rule 3 violated), reject and restart.
+  \item \textbf{Compute visibility clues.} For each white cell $(i,j)$, simulate the four visibility rays and sum the visible white cells (including $(i,j)$ itself). Store this as the full clue grid.
+  \item \textbf{Apply density mask.} Each clue is retained independently with probability $d \in [0,1]$. At least one clue is guaranteed.
+\end{enumerate}
+
+Up to 1000 restarts are attempted per instance. Datasets are generated for sizes $5 \times 5$, $7 \times 7$, $10 \times 8$, and $10 \times 10$, with densities $d \in \{0.3, 0.5, 0.7\}$, 10 instances each.
+
+\subsection{Heuristic Solver}
+
+The Range heuristic applies iterative local propagation driven by the visibility constraints:
+
+\begin{enumerate}
+  \item Mark all clue cells as white (Rule 1).
+  \item For each clue cell $(r,c)$ with value $v_{r,c}$: count the white cells already guaranteed visible in each direction. If the count already equals $v_{r,c}$, the first unknown cell at the boundary of each ray must be black (placing it would exceed the count). Apply the no-adjacency check before placing black.
+  \item Apply the adjacency constraint: any unknown cell adjacent to a known black cell must be white.
+  \item Iterate steps 2–3 until no new assignments are made.
+  \item Fill remaining unknowns with white (the safest default for connectivity).
+  \item Verify the full solution with \texttt{verifySolution}.
+\end{enumerate}
+
+The heuristic is attempted repeatedly within a 10-second time limit. It has no backtracking and makes no random guesses, so it either succeeds quickly or not at all.
+
+\subsection{Results}
+
+\subsubsection{CPLEX — Flow vs.\ Callback}
+
+Both CPLEX strategies find a feasible solution on every tested instance. Table~\ref{tab:range_summary} summarises average solve times per grid size.
+
+\begin{table}[H]
+  \centering
+  \caption{Range CPLEX performance: mean solve time (seconds) over all densities and instances.}
+  \label{tab:range_summary}
+  \begin{tabular}{lrr}
+    \toprule
+    Grid size & Flow (mean / max) & Callback (mean / max) \\
+    \midrule
+    $5  \times 5$  & 0.017\,s / 0.037\,s & 0.003\,s / 0.005\,s \\
+    $7  \times 7$  & 0.022\,s / 0.040\,s & 0.006\,s / 0.007\,s \\
+    $10 \times 8$  & 0.030\,s / 0.050\,s & 0.014\,s / 0.024\,s \\
+    $10 \times 10$ & 0.030\,s / 0.046\,s & 0.022\,s / 0.085\,s \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The callback strategy is consistently \textbf{2$\times$ to 6$\times$ faster} than the flow formulation across all instance classes. This improvement stems directly from the tighter LP relaxation: removing the Big-M flow variables allows CPLEX to prune branches more aggressively. Both approaches remain well within the 60-second time limit even on the largest tested instances.
+
+Importantly, neither solve time grows significantly with instance size in our test range ($5 \times 5$ to $10 \times 10$). This suggests that Range instances at these sizes are easily solvable by CPLEX, and the bottleneck is the solver overhead rather than the combinatorial complexity. Larger grids would be needed to stress-test the scalability.
+
+\subsubsection{Heuristic}
+
+The heuristic solves almost no instances. The only exceptions are a handful of $10 \times 8$ and $5 \times 5$ instances with high clue density ($d = 0.7$), which are solved instantly. On all other instances, the 10-second time limit is reached without finding a valid solution.
+
+This failure mode is expected: the Range visibility constraint is non-local (a ray spans the full grid width), and without backtracking or randomisation the propagation heuristic cannot resolve conflicts arising from the global structure. Connectivity verification further constrains the search space in ways the local heuristic cannot reason about.
+
+\subsubsection{Impact of Clue Density}
+
+Varying the clue density between 0.3 and 0.7 does not significantly change CPLEX performance. Instances with fewer clues (low density) are structurally under-constrained and may admit many solutions, but this does not slow CPLEX since it needs only one feasible point. The heuristic is slightly more likely to succeed on high-density instances (more constraints to propagate from), but this effect is minor.

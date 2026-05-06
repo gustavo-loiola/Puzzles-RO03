@@ -1,0 +1,103 @@
+\section{Mosaic}
+\label{sec:mosaic}
+
+\subsection{Puzzle Description}
+
+Mosaic is played on an $n \times m$ grid. Some cells contain integer clues in $\{0, \ldots, 9\}$. The goal is to colour each cell either black or white such that, for every clue cell $(i,j)$ with value $v_{i,j}$, the number of black cells in the $3\times 3$ neighbourhood centred on $(i,j)$ is exactly $v_{i,j}$. Cells without a clue are unconstrained. The neighbourhood is clipped to the grid boundary, so corner and edge cells have smaller neighbourhoods.
+
+\subsection{ILP Formulation}
+
+\subsubsection{Sets and Decision Variables}
+
+Let $[n] = \{1, \ldots, n\}$ and $[m] = \{1, \ldots, m\}$ denote the row and column index sets. Let $\mathcal{C} \subseteq [n] \times [m]$ be the set of clue cells.
+
+\[
+  x_{i,j} \in \{0, 1\} \qquad \forall\, i \in [n],\; j \in [m]
+\]
+
+where $x_{i,j} = 1$ if cell $(i,j)$ is coloured black, and $x_{i,j} = 0$ if white.
+
+\subsubsection{Objective}
+
+Mosaic is a pure feasibility problem; there is no cost to minimise. We set a constant objective:
+\[
+  \min\; 0
+\]
+
+\subsubsection{Constraints}
+
+For each clue cell $(i,j) \in \mathcal{C}$ with clue value $v_{i,j}$:
+
+\begin{equation}
+  \sum_{\substack{k = \max(1,\,i-1)}}^{\min(n,\,i+1)}\;
+  \sum_{\substack{l = \max(1,\,j-1)}}^{\min(m,\,j+1)}
+  x_{k,l}
+  \;=\; v_{i,j}
+  \label{eq:mosaic_clue}
+\end{equation}
+
+This is the complete model. The number of constraints equals $|\mathcal{C}|$, and the number of binary variables is $n \times m$. Because the constraints involve only a fixed $3 \times 3$ window per clue, the constraint matrix is very sparse, which CPLEX exploits efficiently.
+
+\subsection{Instance Generation}
+
+The generator works by constructing a valid solution first and then deriving a puzzle from it:
+
+\begin{enumerate}
+  \item \textbf{Generate a random solution.} Each cell is independently set to black (1) with probability 0.5.
+  \item \textbf{Compute the full clue grid.} For each cell $(i,j)$, count the black cells in its $3 \times 3$ neighbourhood. This gives a grid where every cell has a valid clue.
+  \item \textbf{Apply a density mask.} Each clue is retained independently with probability $d \in [0,1]$ (the \emph{clue density} parameter). Cells whose clue is dropped become unconstrained (value $-1$ internally).
+\end{enumerate}
+
+The resulting instance is guaranteed to have at least one valid solution (the one generated in step 1), though it may have multiple. Datasets are generated for sizes $3 \times 3$, $5 \times 5$, $10 \times 10$, $15 \times 15$, and $20 \times 20$, with densities $d \in \{0.3, 0.5, 0.7, 0.9\}$, 10 instances each.
+
+\subsection{Heuristic Solver}
+
+The heuristic applies iterative \emph{local constraint propagation}:
+
+\begin{enumerate}
+  \item Initialise all cells as \emph{unknown}.
+  \item For every clue cell $(i,j)$, let $b$ be the number of known-black neighbours and $u$ the number of unknown neighbours. Compute the \emph{remaining demand} $r = v_{i,j} - b$.
+  \begin{itemize}
+    \item If $r = u > 0$: all unknown neighbours must be black. Mark them.
+    \item If $r = 0$ and $u > 0$: all unknown neighbours must be white. Mark them.
+  \end{itemize}
+  \item Repeat step 2 until no new assignments are made.
+  \item If unknowns remain (propagation is stuck), fill each with a random $\{0,1\}$ value and verify the full solution.
+\end{enumerate}
+
+The heuristic is re-run up to a 10-second time limit, repeating the random fallback on failure. On small and well-constrained grids it converges immediately through pure propagation; on large sparse grids it falls back to random guessing.
+
+\subsection{Results}
+
+All experiments were run on the same machine with a 60-second CPLEX time limit per instance.
+
+\subsubsection{CPLEX}
+
+CPLEX finds a feasible solution on every instance without exception. Solve times are presented in Table~\ref{tab:mosaic_summary}.
+
+\begin{table}[H]
+  \centering
+  \caption{Mosaic CPLEX performance summary.}
+  \label{tab:mosaic_summary}
+  \begin{tabular}{lrr}
+    \toprule
+    Grid size & Mean solve time (s) & Max solve time (s) \\
+    \midrule
+    $3 \times 3$   & 0.02 & 0.10 \\
+    $5 \times 5$   & 0.02 & 0.04 \\
+    $10 \times 10$ & 0.02 & 0.04 \\
+    $15 \times 15$ & 0.02 & 0.05 \\
+    $20 \times 20$ & 0.04 & 0.38 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+The ILP formulation is so tightly constrained (each binary variable appears in at most nine clue constraints) that CPLEX almost always solves the LP relaxation at the root node and never needs to branch. Solve times are flat across all densities and remain well under 0.5 seconds even for $20 \times 20$ grids.
+
+\subsubsection{Heuristic}
+
+The heuristic solves small instances ($\leq 5 \times 5$) instantly through pure propagation. On larger instances with low clue density ($d = 0.3$), propagation typically stalls due to insufficient local information, and the random-guess fallback rarely produces a valid solution within the 10-second limit. This is an inherent limitation: without backtracking, a pure propagation heuristic cannot guarantee completeness.
+
+\subsubsection{Discussion}
+
+Because Mosaic has only purely local constraints, the ILP is essentially a linear system over binary variables with no global structure to exploit. CPLEX is therefore overwhelmingly superior to the heuristic for any grid larger than $5 \times 5$. The heuristic is useful only as a fast preliminary check on small, dense instances.

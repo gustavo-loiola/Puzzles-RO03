@@ -1,0 +1,18 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+This project demonstrated the application of Integer Linear Programming to three logic puzzles of contrasting difficulty.
+
+\textbf{Mosaic} (difficulty 1) is an ideal ILP problem: all constraints are purely local, the formulation is compact, and CPLEX solves every tested instance in well under one second regardless of grid size or clue density. The constraint propagation heuristic, while fast on small grids, is unreliable on larger sparse instances due to the absence of backtracking.
+
+\textbf{Range} (difficulty 5) presents a significantly richer modelling challenge. The visibility constraints required a careful linearisation through auxiliary binary variables, and white-cell connectivity required a global enforcement mechanism. Two strategies were implemented and compared:
+\begin{itemize}
+  \item The \textbf{single-commodity flow} formulation encodes connectivity statically but at the cost of Big-M coefficients that weaken the LP relaxation.
+  \item The \textbf{lazy-constraint callback} formulation avoids any extra variables upfront and enforces connectivity dynamically via separator inequalities added as CPLEX discovers integer-infeasible candidates. This yields a tighter LP relaxation and consistent 2--6$\times$ speed improvements across all instance classes.
+\end{itemize}
+Both CPLEX approaches solve every generated instance optimally within seconds. The Range heuristic, based on local propagation of visibility rays, is largely ineffective on random instances because Range's constraints are inherently global and non-local.
+
+\textbf{Galaxies} (difficulty 9) is the most complex puzzle tackled in this project. Rotational symmetry is encoded directly as linear equality constraints, while region connectivity --- which cannot be compactly encoded --- is handled exclusively via lazy-constraint callbacks. Experimental results are pending full validation of the solver pipeline.
+
+\textbf{Future work} could include: (i) completing the experimental evaluation of the Galaxies solver on the generated dataset; (ii) testing larger Range instances ($15 \times 15$ and beyond) to characterise scalability; and (iii) designing a stronger Range heuristic incorporating arc-consistency or constraint propagation over connectivity.
+

@@ -1,0 +1,10 @@
+\section{Introduction}
+
+Combinatorial logic puzzles are a natural testbed for Integer Linear Programming (ILP) solvers: they are well-defined, have clear feasibility conditions, and range in difficulty from trivially constrained to highly structured. This project focuses on three puzzles from Simon Tatham's Portable Puzzle Collection~\cite{tatham}: \textbf{Mosaic} (difficulty 1), a neighbourhood-counting puzzle; \textbf{Range} (difficulty 5), a visibility-and-connectivity puzzle; and \textbf{Galaxies} (difficulty 9), a rotational-symmetry partitioning puzzle.
+
+The project requirements ask us to, for each puzzle: (i) derive a complete ILP formulation, (ii) implement it in Julia using the JuMP modelling language with IBM ILOG CPLEX as the backend solver, (iii) build a random instance generator, (iv) implement a heuristic solver, and (v) analyse computational performance across a batch of generated instances.
+
+Range and Galaxies both require handling global structural constraints that cannot be encoded compactly upfront. For Range, two strategies are explored and compared: embedding white-cell connectivity as a polynomial-size flow network, and enforcing it dynamically through CPLEX \emph{lazy-constraint callbacks}. For Galaxies --- the most difficult puzzle --- region connectivity under the 180° rotational symmetry constraint is handled exclusively through lazy-constraint callbacks, as no compact polynomial formulation is known.
+
+The remainder of this report is organised as follows. Section~\ref{sec:mosaic} covers Mosaic. Section~\ref{sec:range} covers Range, including the two connectivity strategies and their performance comparison. Section~\ref{sec:galaxies} covers Galaxies. Section~\ref{sec:conclusion} summarises the findings and outlines future directions.
+

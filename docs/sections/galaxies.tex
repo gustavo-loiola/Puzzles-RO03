@@ -1,0 +1,43 @@
+\section{Galaxies}
+\label{sec:galaxies}
+
+\subsection{Puzzle Description}
+
+Galaxies is played on an $n \times m$ grid containing a set of dots called \emph{galaxy centres}. The goal is to partition every cell of the grid into connected regions such that:
+
+\begin{enumerate}
+  \item \textbf{One centre per region} — each region contains exactly one dot.
+  \item \textbf{180° rotational symmetry} — every region must be rotationally symmetric about its dot (i.e., for every cell $(i,j)$ in region $k$ with centre $(c_r^k, c_c^k)$, the cell $(2c_r^k - i,\; 2c_c^k - j)$ must also belong to region $k$).
+  \item \textbf{Connected regions} — each region must form a 4-connected set of cells.
+  \item \textbf{Full partition} — every cell belongs to exactly one region.
+\end{enumerate}
+
+Galaxy centres can lie on cell centres, on edge midpoints, or on vertex intersections of the grid, making the symmetry axis non-integer in general. This puzzle is rated difficulty 9, the highest in the project, because the connectivity constraint (Rule 3) for each region cannot be encoded with a polynomial number of linear inequalities upfront.
+
+\subsection{ILP Formulation}
+
+% TODO
+
+\subsubsection{Sets and Decision Variables}
+
+% TODO
+
+\subsubsection{Constraints}
+
+% TODO
+
+\subsection{Connectivity via Lazy-Constraint Callbacks}
+
+% TODO
+
+\subsection{Instance Generation}
+
+% TODO
+
+\subsection{Heuristic Solver}
+
+% TODO
+
+\subsection{Results}
+
+% TODO
