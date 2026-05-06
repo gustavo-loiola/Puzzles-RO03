@@ -11,19 +11,20 @@ You have a grid of squares; some squares contain numbers. Your job is to colour 
 3. **White connectivity** — all white squares must form a single connected component (no isolated white regions).
 4. **Visibility constraint** — each number $x$ indicates the total count of white squares visible from that cell, looking in all four cardinal directions (up, down, left, right) until hitting a wall or a black square. The cell itself is included in the count.
 
-
 > As a consequence of rules 3 and 4, no square can ever contain the number 1 (it would need all 4 neighbours to be black, isolating itself).
+
+---
 
 ## Mathematical Formulation
 
-This problem is modeled as a binary linear program with auxiliary continuous flow variables for connectivity.
+This problem is modeled as a binary linear program. Two solver strategies are implemented, differing only in how they enforce **white connectivity** (Rule 3). Rules 1, 2 and 4 are identical in both.
 
 ### Sets and Indices
 
 - Grid of size $n \times m$.
 - $\mathcal{C} = \{(i,j) \mid \text{cell } (i,j) \text{ contains a clue number}\}$, with clue value $v_{i,j}$
 - $\mathcal{N}(i,j)$ = set of 4-adjacent neighbours (up, down, left, right) of cell $(i,j)$
-- $s = (s_r, s_c)$ = any fixed cell in $\mathcal{C}$, chosen as the flow source (it is guaranteed to be white by Rule 1)
+- $s = (s_r, s_c)$ = any fixed cell in $\mathcal{C}$, chosen as the connectivity reference (it is guaranteed white by Rule 1)
 
 ### Decision Variables
 
@@ -42,13 +43,7 @@ For each clue cell $(r,c) \in \mathcal{C}$, define binary variables capturing wh
 - $\text{vis}^D_{r,c,d} \in \{0,1\}$ — cell $(r+d, c)$ is visible looking **down**, for $d = 1, \ldots, n - r$
 - $\text{vis}^U_{r,c,d} \in \{0,1\}$ — cell $(r-d, c)$ is visible looking **up**, for $d = 1, \ldots, r - 1$
 
-A cell at distance $d$ is visible iff **all** cells between it and the clue are white.
-
-**Flow variables** (for white connectivity):
-
-$$f_{(i,j) \to (i',j')} \geq 0 \quad \forall\, (i',j') \in \mathcal{N}(i,j)$$
-
-Directed flow on each edge of the grid (both directions).
+A cell at distance $d$ is visible if and only if **all** cells between it and the clue are white.
 
 ### Objective Function
 
@@ -56,7 +51,7 @@ This is a feasibility problem — we use a constant objective:
 
 $$\min\ 0$$
 
-### Constraints
+### Shared Constraints (both solvers)
 
 **1. Numbered cells are white:**
 
@@ -86,9 +81,19 @@ $$1 + \sum_{d=1}^{m-c} \text{vis}^R_{r,c,d} + \sum_{d=1}^{c-1} \text{vis}^L_{r,c
 
 The leading $1$ accounts for the cell seeing itself.
 
-**4. White connectivity (single-commodity network flow):**
+---
 
-We route flow from the source $s$ to every other white cell. Each white cell (other than $s$) must receive exactly 1 unit.
+## Connectivity Strategy 1 — Single-Commodity Network Flow
+
+> Implemented in `resolution.jl` → `cplexSolve`
+
+**Additional variables:**
+
+$$f_{(i,j) \to (i',j')} \geq 0 \quad \forall\, (i',j') \in \mathcal{N}(i,j)$$
+
+Directed flow on each edge of the grid (both directions).
+
+**Flow constraints:**
 
 **(a) Flow conservation at the source $s$:**
 
@@ -108,11 +113,71 @@ $$f_{(i,j) \to (i',j')} \leq n \cdot m \cdot (1 - b_{i,j})$$
 
 $$f_{(i,j) \to (i',j')} \leq n \cdot m \cdot (1 - b_{i',j'})$$
 
-These ensure no flow enters or leaves a black cell.
+These ensure no flow enters or leaves a black cell. The big-M constant $n \cdot m$ is an upper bound on the total number of white cells.
+
+**Complexity:** $O(nm)$ additional continuous flow variables; $O(nm)$ additional constraints. Big-M coefficients weaken the LP relaxation.
+
+---
+
+## Connectivity Strategy 2 — Lazy Constraint Callbacks (Separator Cuts)
+
+> Implemented in `resolutionWithCallback.jl` → `cplexSolveWithCallback`
+
+Instead of adding flow variables upfront, connectivity is enforced **dynamically**: every time CPLEX finds an integer-feasible candidate $\hat{b}$, a callback runs a BFS from the source $s$ through white cells. If a disconnected white component is found, a **separator cut** is generated and added as a lazy constraint.
+
+**No additional variables** are introduced in the model.
+
+### Separator Inequality
+
+Let $\hat{b}$ be the current integer candidate. A connected component $S$ of white cells in $\hat{b}$ is **disconnected** if $s \notin S$. Define its outer neighbourhood:
+
+$$N(S) = \{(i,j) \notin S \mid \exists\, (i',j') \in S : (i,j) \in \mathcal{N}(i',j')\}$$
+
+In the candidate $\hat{b}$, every cell in $S$ is white ($\hat{b} = 0$) and every cell in $N(S)$ is black ($\hat{b} = 1$) — otherwise $S$ would be reachable from $s$. The following inequality forbids precisely this pattern:
+
+$$\sum_{(i,j) \in S} b_{i,j} \;+\; \sum_{(i,j) \in N(S)} (1 - b_{i,j}) \;\geq\; 1$$
+
+**Interpretation:** the next feasible solution must either turn at least one cell of $S$ black (destroying the isolated component) or turn at least one cell of $N(S)$ white (opening a passage to the rest of the grid). Both outcomes restore connectivity.
+
+**Validity:** the inequality is always satisfiable. If $S$ becomes entirely black, the left-hand side's first sum equals $|S| \geq 1$. If any neighbour becomes white, the second sum contributes at least 1. In all valid connected solutions, the inequality holds trivially.
+
+### Callback Algorithm
+
+```
+On each integer candidate b̂:
+  1. BFS from s through white cells  →  reachable set A
+  2. For each white cell w ∉ A not yet processed:
+       a. BFS to enumerate its full component S
+       b. Compute N(S)
+       c. Submit the separator cut for S
+  3. If no cut submitted → candidate is connected → accept
+```
+
+All disconnected components are cut in a **single callback invocation**, minimising round-trips to the solver.
+
+**Complexity:** no additional variables; cuts are added on demand. The LP relaxation is tighter than the flow formulation (no big-M). In the worst case, exponentially many cuts may be needed, but in practice very few are required for Range instances.
+
+---
+
+## Comparison of Connectivity Strategies
+
+| Property | Flow (Strategy 1) | Callbacks (Strategy 2) |
+|---|---|---|
+| Additional variables | $O(nm)$ continuous | None |
+| Constraints added upfront | $O(nm)$ | None |
+| Constraints added dynamically | None | One per disconnected component found |
+| Big-M coefficients | Yes ($n \cdot m$) | No |
+| LP relaxation quality | Weaker | Stronger |
+| Implementation complexity | Low | Medium |
+| Best suited for | Small grids | Medium/large grids |
+
+---
 
 ### Complexity Note
 
-The model has $O(nm)$ primary variables, $O(|\mathcal{C}| \cdot (n+m))$ visibility variables, and $O(nm)$ flow variables. The number of constraints is $O(|\mathcal{C}| \cdot (n+m)^2 + nm)$. For moderate grid sizes (up to ~20×20), this is tractable for CPLEX.
+Both models share $O(nm)$ primary binary variables and $O(|\mathcal{C}| \cdot (n+m))$ visibility variables. The number of shared constraints is $O(|\mathcal{C}| \cdot (n+m)^2 + nm)$. For moderate grid sizes (up to ~20×20), both strategies are tractable for CPLEX.
+
+---
 
 ## Instance File Format
 
@@ -131,25 +196,37 @@ The model has $O(nm)$ primary variables, $O(|\mathcal{C}| \cdot (n+m))$ visibili
 ...
 ```
 
+---
+
 ## Directory Structure
 
-* `data/` — Grid instances as `.txt` files.
-* `res/cplex/` — CPLEX solving results (`solveTime` and `isOptimal`).
-* `src/` — Julia source code:
-    * `io.jl` — Read instances, display grid/solution, generate performance reports.
-    * `generation.jl` — Generate random Range instances.
-    * `resolution.jl` — JuMP/CPLEX model and heuristic solver.
+```
+range/
+├── data/                    # Grid instances (.txt files)
+├── res/
+│   ├── cplex/               # Results from the flow-based solver
+│   ├── cplex_callback/      # Results from the callback-based solver
+│   └── heuristique/         # Results from the heuristic solver
+└── src/
+    ├── io.jl                # Read/write/display instances, performance reports
+    ├── generation.jl        # Random instance generation
+    ├── resolution.jl        # Flow-based ILP + heuristic solver
+    └── resolutionWithCallback.jl  # Callback-based ILP solver
+```
+
+---
 
 ## Usage
 
-From the Julia REPL, navigate to the `range/` directory:
+From the Julia REPL, navigate to the `range/src/` directory.
+
+### Flow-based solver (Strategy 1)
 
 ```julia
-cd("src")
 include("resolution.jl")
 
 # Solve a single instance
-grid = readInputFile("../data/instanceTest.txt")
+grid, _ = readInputFile("../data/instanceTest.txt")
 displayGrid(grid)
 
 isOptimal, solveTime, solution = cplexSolve(grid)
@@ -162,4 +239,36 @@ solveDataSet()
 
 # Generate results table
 resultsArray("../res/array.tex")
+```
+
+### Callback-based solver (Strategy 2)
+
+```julia
+include("resolutionWithCallback.jl")
+
+# Solve a single instance
+grid, _ = readInputFile("../data/instanceTest.txt")
+displayGrid(grid)
+
+isOptimal, solveTime, solution = cplexSolveWithCallback(grid)
+if isOptimal
+    displaySolution(solution)
+end
+
+# Solve all instances in data/ (writes to ../res/cplex_callback/)
+solveDataSetWithCallback()
+```
+
+### Comparing both strategies
+
+```julia
+include("resolutionWithCallback.jl")   # also loads resolution.jl
+
+grid, _ = readInputFile("../data/instanceTest.txt")
+
+isOpt1, t1, sol1 = cplexSolve(grid)
+isOpt2, t2, sol2 = cplexSolveWithCallback(grid)
+
+println("Flow     — optimal: $isOpt1  time: $(round(t1, sigdigits=3))s")
+println("Callback — optimal: $isOpt2  time: $(round(t2, sigdigits=3))s")
 ```

@@ -4,7 +4,8 @@
 # =============================================================================
 
 # --- Setup ---
-include(joinpath(@__DIR__, "src", "resolution.jl"))
+# resolutionWithCallback.jl includes resolution.jl, which includes generation.jl and io.jl
+include(joinpath(@__DIR__, "src", "resolutionWithCallback.jl"))
 cd(joinpath(@__DIR__, "src"))
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -21,21 +22,32 @@ for file in sort(filter(x -> occursin(".txt", x), readdir("../data/")))
     println("  Grid size: $(n) rows × $(m) columns")
     displayGrid(grid)
 
-    isOpt, t, sol = cplexSolve(grid)
-    println("  Optimal: $isOpt | Time: $(round(t, digits=4))s")
+    # Flow-based solver
+    isOpt1, t1, sol1 = cplexSolve(grid)
+    println("  [Flow]     Optimal: $isOpt1 | Time: $(round(t1, digits=4))s")
 
+    # Callback-based solver
+    isOpt2, t2, sol2 = cplexSolveWithCallback(grid)
+    println("  [Callback] Optimal: $isOpt2 | Time: $(round(t2, digits=4))s")
+
+    # Speedup
+    if isOpt1 && isOpt2 && t1 > 0
+        ratio = t1 / t2
+        faster = ratio > 1 ? "Callback $(round(ratio, digits=2))× faster" :
+                             "Flow $(round(1/ratio, digits=2))× faster"
+        println("  → $faster")
+    end
+
+    # Show solution (prefer callback if both solved)
+    sol = isOpt2 ? sol2 : sol1
+    isOpt = isOpt2 || isOpt1
     if isOpt
         displaySolution(sol; grid=grid)
-
         valid = verifySolution(grid, sol)
         println("  Verification: ", valid ? "✓ VALID" : "✗ INVALID")
 
         if all(expected .!= -1)
-            if sol == expected
-                println("  ✓ Solution matches expected answer")
-            else
-                println("  ✗ MISMATCH with expected answer!")
-            end
+            println("  vs. expected: ", sol == expected ? "✓ MATCH" : "✗ MISMATCH")
         end
     end
 end
@@ -83,13 +95,17 @@ nFiles = length(filter(x -> occursin(".txt", x), readdir("../data/")))
 println("\nTotal instances in data/: $nFiles")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  PART 4 — Batch Solve All Instances (CPLEX + Heuristic)
+#  PART 4 — Batch Solve All Instances (Flow CPLEX + Callback CPLEX + Heuristic)
 # ═══════════════════════════════════════════════════════════════════════════════
 println("\n\n" * "=" ^ 70)
-println("  PART 4 — Batch Solve (CPLEX + Heuristic)")
+println("  PART 4 — Batch Solve (Flow + Callback + Heuristic)")
 println("=" ^ 70)
 
+println("\n  4a — Flow-based CPLEX + Heuristic...")
 solveDataSet()
+
+println("\n  4b — Callback-based CPLEX...")
+solveDataSetWithCallback()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  PART 5 — Generate Results Report
@@ -115,10 +131,20 @@ println("\n\n" * "=" ^ 70)
 println("  ALL DONE")
 println("=" ^ 70)
 
-nCplex = isdir("../res/cplex") ? count(f -> occursin("isOptimal = true", read(joinpath("../res/cplex", f), String)), filter(x -> occursin(".txt", x), readdir("../res/cplex"))) : 0
-nHeur  = isdir("../res/heuristique") ? count(f -> occursin("isOptimal = true", read(joinpath("../res/heuristique", f), String)), filter(x -> occursin(".txt", x), readdir("../res/heuristique"))) : 0
+function countSolved(folder)
+    !isdir(folder) && return 0
+    return count(
+        f -> occursin("isOptimal = true", read(joinpath(folder, f), String)),
+        filter(x -> occursin(".txt", x), readdir(folder))
+    )
+end
+
+nCplex    = countSolved("../res/cplex")
+nCallback = countSolved("../res/cplex_callback")
+nHeur     = countSolved("../res/heuristique")
 
 println("  Instances in data/:           $nFiles")
-println("  Solved by CPLEX:              $nCplex")
-println("  Solved by Heuristic:          $nHeur")
+println("  Solved by CPLEX (flow):       $nCplex / $nFiles")
+println("  Solved by CPLEX (callback):   $nCallback / $nFiles")
+println("  Solved by Heuristic:          $nHeur / $nFiles")
 println("  Results table:                res/array.tex")
