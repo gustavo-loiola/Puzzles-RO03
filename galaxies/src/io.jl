@@ -48,17 +48,21 @@ Print the empty Galaxies grid on the double-grid (size 2n-1 × 2m-1).
 Dots are shown as ●. Row/column indices are printed along the border.
 """
 function displayGrid(n::Int, m::Int, dots::Vector{Tuple{Int,Int}})
-    R, C   = 2n - 1, 2m - 1
+    R, C    = 2n - 1, 2m - 1
     dot_set = Set(dots)
 
     println("Galaxies grid  ($n × $m cells, double-grid $R × $C)")
     println()
-    print("    ")
-    for j in 1:C; print(j % 10); end
+
+    # column index header — two-digit friendly
+    print("     ")
+    for j in 1:C
+        print(j % 10)
+    end
     println()
 
     for i in 1:R
-        print(lpad(i, 3), " ")
+        print(lpad(i, 3), "  ")
         for j in 1:C
             if (i, j) in dot_set
                 print("●")
@@ -82,29 +86,62 @@ end
     displaySolution(n, m, dots, assignment)
 
 Print the solved grid. Each cell shows its galaxy label (A–Z, then numbers).
-Horizontal borders between cells belonging to different galaxies are drawn.
+Full continuous borders are drawn around every cell; shared borders between
+cells of the same galaxy are drawn as a thin interior line, while borders
+between different galaxies are drawn as a thick separator.
 """
 function displaySolution(n::Int, m::Int,
                          dots::Vector{Tuple{Int,Int}},
                          assignment::Matrix{Int})
+
+    # Cell width (characters between vertical bars): label + padding
+    CW = 3   # " A " — one space each side
+
     label(k) = k <= 26 ? string(Char('A' + k - 1)) : string(k)
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    # Full horizontal rule spanning all columns
+    full_rule(ch) = "+" * repeat(ch ^ CW * "+", m)
+
+    # Horizontal separator between row i and row i+1:
+    # thick "═══" where galaxies differ, thin "───" where they are the same.
+    function hsep(i)
+        s = "+"
+        for j in 1:m
+            s *= (assignment[i,j] != assignment[i+1,j] ? "═" ^ CW : "─" ^ CW) * "+"
+        end
+        return s
+    end
+
+    # Vertical bar between cell (i,j) and (i,j+1):
+    # thick "║" where galaxies differ, thin "│" where the same.
+    function vbar(i, j)
+        j == 0 && return "║"   # left border
+        j == m && return "║"   # right border
+        return assignment[i,j] != assignment[i,j+1] ? "║" : "│"
+    end
+
+    # ── print ─────────────────────────────────────────────────────────────────
 
     println("Galaxies solution:")
     println()
-    println("+" * repeat("----", m) * "+")
+    println(full_rule("═"))
 
     for i in 1:n
-        row = join(["| $(label(assignment[i,j]))  " for j in 1:m]) * "|"
+        # Cell row
+        row = ""
+        for j in 1:m
+            row *= vbar(i, j-1) * " $(label(assignment[i,j])) "
+        end
+        row *= vbar(i, m)
         println(row)
 
-        if i < n
-            sep = "+" * join([assignment[i,j] != assignment[i+1,j] ? "----" : "    "
-                               for j in 1:m]) * "+"
-            println(sep)
-        end
+        # Separator row (skip after last row)
+        i < n && println(hsep(i))
     end
 
-    println("+" * repeat("----", m) * "+")
+    println(full_rule("═"))
     println()
 end
 
