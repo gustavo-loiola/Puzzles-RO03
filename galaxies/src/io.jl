@@ -44,39 +44,50 @@ end
 """
     displayGrid(n, m, dots)
 
-Print the empty Galaxies grid on the double-grid (size 2n-1 × 2m-1).
-Dots are shown as ●. Row/column indices are printed along the border.
+Print the unsolved Galaxies grid in the same box-drawing style as `displaySolution`.
+All cells are empty; galaxy centres (dots) are shown as ● at their exact position:
+  - cell centre    → inside the cell
+  - horizontal edge → on the ─── separator between two rows
+  - vertical edge   → on the │ separator between two columns
+  - corner          → on the + joint
 """
 function displayGrid(n::Int, m::Int, dots::Vector{Tuple{Int,Int}})
-    R, C    = 2n - 1, 2m - 1
+    CW      = 3
     dot_set = Set(dots)
 
-    println("Galaxies grid  ($n × $m cells, double-grid $R × $C)")
-    println()
+    # dot at double-grid (dr, dc)?
+    is_dot(dr, dc) = (dr, dc) in dot_set
 
-    # column index header — two-digit friendly
-    print("     ")
-    for j in 1:C
-        print(j % 10)
+    # Joint character at grid corner (i,j), 0-indexed, double-grid (2i, 2j)
+    joint(i, j)   = is_dot(2i, 2j) ? "●" : "+"
+
+    # Horizontal edge segment for cell column j (1-indexed) on border row i (0-indexed)
+    # double-grid position: (2i, 2j-1)
+    function h_edge(i, j)
+        is_dot(2i, 2j-1) ? "─●─" : "─"^CW
     end
+
+    # Vertical bar on cell-column border j (0-indexed) for cell row i (1-indexed)
+    # double-grid position: (2i-1, 2j)
+    v_bar(i, j) = is_dot(2i-1, 2j) ? "●" : "│"
+
+    # Cell interior for cell (i,j) — dot if centre matches, else blank
+    # double-grid position: (2i-1, 2j-1)
+    cell(i, j) = is_dot(2i-1, 2j-1) ? " ● " : " "^CW
+
+    println("Galaxies grid  ($n × $m)")
     println()
 
-    for i in 1:R
-        print(lpad(i, 3), "  ")
-        for j in 1:C
-            if (i, j) in dot_set
-                print("●")
-            elseif iseven(i) && iseven(j)
-                print("·")   # corner intersection
-            elseif iseven(i)
-                print("─")   # horizontal edge midpoint
-            elseif iseven(j)
-                print("│")   # vertical edge midpoint
-            else
-                print(" ")   # cell centre
-            end
+    for i in 1:n+1
+        # Horizontal rule above row i (or bottom border after last row)
+        rule = join(joint(i-1, j-1) * h_edge(i-1, j) for j in 1:m) * joint(i-1, m)
+        println(rule)
+
+        if i <= n
+            # Cell content row
+            row = join(v_bar(i, j-1) * cell(i, j) for j in 1:m) * v_bar(i, m)
+            println(row)
         end
-        println()
     end
     println()
 end
