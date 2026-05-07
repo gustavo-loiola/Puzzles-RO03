@@ -1,0 +1,9 @@
+# Double-grid coordinates: cell (i,j) has centre at (2i-1, 2j-1)
+4 4
+# dots
+2 2
+1 5
+6 2
+7 5
+3 6
+6 7

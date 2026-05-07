@@ -1,0 +1,10 @@
+# Galaxies instance — 5x5 grid, 4 galaxies
+5 5
+# dots
+4 1
+9 1
+1 8
+9 9
+2 4
+7 5
+4 9
