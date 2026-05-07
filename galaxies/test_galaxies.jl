@@ -26,6 +26,8 @@ println("=" ^ 60)
 println("GALAXIES SOLVER — TEST")
 println("=" ^ 60)
 
-run_instance("4×4 instance (3 galaxies)",  "data/instance_4x4_1.txt"; time_limit=60.0)
-run_instance("5×5 instance (4 galaxies)",  "data/instance_5x5_1.txt"; time_limit=120.0)
+run_instance("4×4 instance",  "data/instance_4x4_1.txt"; time_limit=60.0)
+run_instance("5×5 instance",  "data/instance_5x5_1.txt"; time_limit=120.0)
 run_instance("7×7 instance",               "data/instance_7x7_1.txt"; time_limit=120.0)
+run_instance("10×10 instance",               "data/instance_10x10_1.txt"; time_limit=120.0)
+
