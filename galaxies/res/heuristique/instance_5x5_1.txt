@@ -1,2 +1,7 @@
-solveTime = 3.0994415283203125e-6
+5 5 5 3 3
+1 5 5 5 7
+1 6 6 6 7
+6 6 6 6 6
+2 6 6 6 4
+solveTime = 0.0
 isOptimal = true

@@ -8,3 +8,7 @@ Range and Galaxies both require handling global structural constraints that cann
 
 The remainder of this report is organised as follows. Section~\ref{sec:mosaic} covers Mosaic. Section~\ref{sec:range} covers Range, including the two connectivity strategies and their performance comparison. Section~\ref{sec:galaxies} covers Galaxies. Section~\ref{sec:conclusion} summarises the findings and outlines future directions.
 
+\paragraph{Experimental setup.} All experiments use IBM ILOG CPLEX 22.1.1.0 driven from Julia 1.12 through JuMP 1.30 and CPLEX.jl 1.1, on a Windows 11 laptop. Per-instance time limits are stated in each puzzle's results section. Every reported solution---both CPLEX and heuristic---is independently re-checked against the puzzle rules by an out-of-model BFS / arithmetic verifier (\texttt{verifySolution}). We adopt the Sudoku reference solver provided by the course as the methodological template (file layout, \texttt{solveDataSet} / \texttt{resultsArray} conventions, callback mechanics).
+
+\paragraph{Optimality vs.\ feasibility.} All three puzzles are \emph{feasibility} problems---any partition / colouring satisfying the rules is a valid solution. We use \texttt{Min 0} as a (constant) objective except in Galaxies, where a perimeter penalty is added as a tiebreaker. Throughout the report and the result files, ``\texttt{isOptimal = true}'' should be read as ``CPLEX returned a feasible integer point''; with a constant objective, optimality and feasibility coincide.
+

@@ -9,7 +9,7 @@ function run_instance(label, path; time_limit=120.0)
     n, m, dots = readInputFile(path)
     displayGrid(n, m, dots)
 
-    is_opt, t, assign, h_assign = cplexSolve(n, m, dots; time_limit)
+    is_opt, t, assign, h_assign, _ = cplexSolve(n, m, dots; time_limit)
 
     displayPartialSolution(n, m, dots, h_assign)
 

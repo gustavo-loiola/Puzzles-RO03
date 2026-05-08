@@ -85,14 +85,18 @@ Lines starting with `#` are ignored.
 
 ```
 galaxies/
-├── data/             ← instance files (.txt)
+├── data/                  ← instance files (.txt)
 ├── res/
-│   ├── cplex/        ← CPLEX results (solveTime, isOptimal)
-│   └── heuristique/  ← heuristic results
-└── src/
-    ├── io.jl         ← file I/O, grid/solution display, LaTeX table
-    ├── generation.jl ← (TODO) random instance generator
-    └── resolution.jl ← heuristic + ILP model + callback
+│   ├── cplex/             ← CPLEX results (assignment matrix, solveTime, isOptimal)
+│   ├── heuristique/       ← heuristic results (same format)
+│   └── array.tex          ← LaTeX results table
+├── src/
+│   ├── io.jl              ← file I/O, geometry helpers, display, LaTeX table, performance plot
+│   ├── generation.jl      ← random instance generator (region-growing with symmetric pairs)
+│   └── resolution.jl      ← heuristic + ILP model + lazy-constraint callback + verifier
+├── presentation_notes.md  ← defense crib sheet
+├── run_full_galaxies.jl   ← end-to-end pipeline (generate → solve → report)
+└── test_galaxies.jl       ← quick smoke test on hand-crafted instances
 ```
 
 ## Usage

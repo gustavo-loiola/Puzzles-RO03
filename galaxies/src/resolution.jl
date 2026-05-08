@@ -41,55 +41,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 using JuMP, CPLEX
-include("io.jl")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Geometry helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
-"""
-    cells_touched_by_dot(dr, dc, n, m) -> Vector{Tuple{Int,Int}}
-
-Return the grid cells (row, col) that a dot at double-grid position (dr, dc) touches.
-The number of cells depends on the parity of dr and dc (see io.jl header).
-"""
-function cells_touched_by_dot(dr::Int, dc::Int, n::Int, m::Int)
-    rows = iseven(dr) ? [dr÷2, dr÷2 + 1] : [(dr+1)÷2]
-    cols = iseven(dc) ? [dc÷2, dc÷2 + 1] : [(dc+1)÷2]
-    return [(r, c) for r in rows, c in cols if 1 <= r <= n && 1 <= c <= m]
-end
-
-
-"""
-    sym_cell(i, j, dr, dc, n, m) -> Union{Tuple{Int,Int}, Nothing}
-
-Return the 180°-symmetric cell of (i,j) about dot (dr, dc) in double-grid coords.
-The centre of cell (i,j) is at double-grid (2i-1, 2j-1); its symmetric is
-(2·dr − (2i-1),  2·dc − (2j-1)). Returns `nothing` if outside the grid.
-"""
-function sym_cell(i::Int, j::Int, dr::Int, dc::Int, n::Int, m::Int)
-    si_d = 2dr - (2i - 1)
-    sj_d = 2dc - (2j - 1)
-    iseven(si_d) || iseven(sj_d) && return nothing   # not a cell centre
-    si, sj = (si_d + 1) ÷ 2, (sj_d + 1) ÷ 2
-    return (1 <= si <= n && 1 <= sj <= m) ? (si, sj) : nothing
-end
-
-
-"""
-    grid_neighbors(i, j, n, m) -> Vector{Tuple{Int,Int}}
-
-4-connected neighbours of cell (i,j) within an n×m grid.
-"""
-function grid_neighbors(i::Int, j::Int, n::Int, m::Int)
-    nb = Tuple{Int,Int}[]
-    i > 1 && push!(nb, (i-1, j))
-    i < n && push!(nb, (i+1, j))
-    j > 1 && push!(nb, (i, j-1))
-    j < m && push!(nb, (i, j+1))
-    return nb
-end
+include("generation.jl")   # also brings in io.jl + geometry helpers
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -293,8 +245,9 @@ Keyword arguments
 - `use_heuristic_start` : if true, warm-start CPLEX with the heuristic solution.
 """
 function cplexSolve(n::Int, m::Int, dots::Vector{Tuple{Int,Int}};
-                    time_limit::Float64      = 300.0,
-                    use_heuristic_start::Bool = true)
+                    time_limit::Float64       = 300.0,
+                    use_heuristic_start::Bool = true,
+                    use_sym_cut::Bool         = true)
 
     K = length(dots)
     dot_cells, sym_pairs, eligible = precompute(n, m, dots)
@@ -392,6 +345,7 @@ function cplexSolve(n::Int, m::Int, dots::Vector{Tuple{Int,Int}};
     #
     # Optimization: we only read x values for (i,j,k) pairs that exist,
     # skipping the ~68% of (cell, galaxy) pairs that are ineligible.
+    n_lazy_cuts = Ref(0)
     function connectivity_callback(cb_data)
         callback_node_status(cb_data, model) != MOI.CALLBACK_NODE_STATUS_INTEGER && return
 
@@ -449,12 +403,44 @@ function cplexSolve(n::Int, m::Int, dots::Vector{Tuple{Int,Int}};
                             for nb in grid_neighbors(ci, cj, n, m)
                             if nb ∉ S)
 
-                # Separator cut: S must shrink or a bridge from N(S) must join galaxy k
+                # Separator cut. In the candidate, every cell of S has x[·,k]=1
+                # and every cell of N(S) has x[·,k]=0; the cut forces at least
+                # one of those bits to flip in any future feasible solution:
+                #   Σ_{c∈S}    (1 - x[c,k])  +  Σ_{c∈N(S)} x[c,k]  ≥  1
                 cut = @build_constraint(
-                    sum(x[(ci,cj,k)]   for (ci,cj) in S  if haskey(x,(ci,cj,k))) +
-                    sum(1-x[(ni,nj,k)] for (ni,nj) in NS if haskey(x,(ni,nj,k))) >= 1
+                    sum(1-x[(ci,cj,k)] for (ci,cj) in S  if haskey(x,(ci,cj,k))) +
+                    sum(x[(ni,nj,k)]   for (ni,nj) in NS if haskey(x,(ni,nj,k))) >= 1
                 )
                 MOI.submit(model, MOI.LazyConstraint(cb_data), cut)
+                n_lazy_cuts[] += 1
+
+                # Symmetry-strengthened cut: σ_k(S) is also a disconnected
+                # component of galaxy k (because galaxy k is symmetric about
+                # its dot). Submitting the analogous cut for σ_k(S) preempts
+                # CPLEX rediscovering the mirror configuration.
+                if use_sym_cut
+                    dr_k, dc_k = dots[k]
+                    S_sym = Tuple{Int,Int}[]
+                    ok = true
+                    for (ci, cj) in S
+                        img = sym_cell(ci, cj, dr_k, dc_k, n, m)
+                        if img === nothing
+                            ok = false; break
+                        end
+                        push!(S_sym, img)
+                    end
+                    if ok && Set(S_sym) != S
+                        NS_sym = Set(nb for c in S_sym
+                                        for nb in grid_neighbors(c[1], c[2], n, m)
+                                        if nb ∉ Set(S_sym))
+                        cut_sym = @build_constraint(
+                            sum(1-x[(ci,cj,k)] for (ci,cj) in S_sym  if haskey(x,(ci,cj,k))) +
+                            sum(x[(ni,nj,k)]   for (ni,nj) in NS_sym if haskey(x,(ni,nj,k))) >= 1
+                        )
+                        MOI.submit(model, MOI.LazyConstraint(cb_data), cut_sym)
+                        n_lazy_cuts[] += 1
+                    end
+                end
             end
         end
     end
@@ -480,7 +466,74 @@ function cplexSolve(n::Int, m::Int, dots::Vector{Tuple{Int,Int}};
         end
     end
 
-    return is_optimal, elapsed, assignment, h_assign
+    return is_optimal, elapsed, assignment, h_assign, n_lazy_cuts[]
+end
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Independent verifier
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    verifySolution(n, m, dots, assignment) -> Bool
+
+Independently check that `assignment` satisfies the four Galaxies rules:
+partition, anchor, 180° symmetry about each galaxy's dot, and connectivity.
+Useful to sanity-check both CPLEX and heuristic outputs.
+"""
+function verifySolution(n::Int, m::Int,
+                        dots::Vector{Tuple{Int,Int}},
+                        assignment::Matrix{Int})
+
+    K = length(dots)
+
+    # Every cell must hold a valid galaxy index
+    for i in 1:n, j in 1:m
+        (1 <= assignment[i,j] <= K) || return false
+    end
+
+    # Anchor cells must belong to their galaxy
+    for k in 1:K
+        for (ai, aj) in cells_touched_by_dot(dots[k][1], dots[k][2], n, m)
+            assignment[ai, aj] == k || return false
+        end
+    end
+
+    # Symmetry: every cell of galaxy k must have its symmetric image also in k
+    for k in 1:K
+        dr, dc = dots[k]
+        for i in 1:n, j in 1:m
+            assignment[i, j] == k || continue
+            img = sym_cell(i, j, dr, dc, n, m)
+            (img === nothing) && return false
+            assignment[img[1], img[2]] == k || return false
+        end
+    end
+
+    # Connectivity: BFS each galaxy from one of its anchor cells
+    for k in 1:K
+        cells = Set{Tuple{Int,Int}}()
+        for i in 1:n, j in 1:m
+            assignment[i,j] == k && push!(cells, (i,j))
+        end
+        isempty(cells) && return false
+
+        anchor    = cells_touched_by_dot(dots[k][1], dots[k][2], n, m)[1]
+        reachable = Set{Tuple{Int,Int}}([anchor])
+        queue     = [anchor]
+        while !isempty(queue)
+            ci, cj = popfirst!(queue)
+            for (ni, nj) in grid_neighbors(ci, cj, n, m)
+                if (ni, nj) ∈ cells && (ni, nj) ∉ reachable
+                    push!(reachable, (ni, nj))
+                    push!(queue,     (ni, nj))
+                end
+            end
+        end
+        length(reachable) == length(cells) || return false
+    end
+
+    return true
 end
 
 
@@ -516,7 +569,9 @@ function solveDataSet()
             h_ok, h_assign = heuristicSolve(n, m, dots, eligible)
             h_time = time() - t0
             open(h_path, "w") do f
-                println(f, "solveTime = $h_time\nisOptimal = $h_ok")
+                h_ok && writeSolution(f, h_assign)
+                println(f, "solveTime = $h_time")
+                println(f, "isOptimal = $h_ok")
             end
             println("  Heuristic: $(h_ok ? "✓" : "✗")  $(round(h_time, sigdigits=3))s")
             h_ok && displaySolution(n, m, dots, h_assign)
@@ -525,9 +580,12 @@ function solveDataSet()
         # CPLEX
         c_path = resFolder * "cplex/" * file
         if !isfile(c_path)
-            is_opt, c_time, c_assign, h_assign = cplexSolve(n, m, dots)
+            is_opt, c_time, c_assign, _, ncuts = cplexSolve(n, m, dots)
             open(c_path, "w") do f
-                println(f, "solveTime = $c_time\nisOptimal = $is_opt")
+                is_opt && writeSolution(f, c_assign)
+                println(f, "solveTime = $c_time")
+                println(f, "isOptimal = $is_opt")
+                println(f, "lazyCuts  = $ncuts")
             end
             println("  CPLEX:     $(is_opt ? "✓" : "✗")  $(round(c_time, sigdigits=3))s")
             is_opt && displaySolution(n, m, dots, c_assign)

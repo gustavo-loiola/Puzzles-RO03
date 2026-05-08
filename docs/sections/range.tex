@@ -191,30 +191,46 @@ Both CPLEX strategies find a feasible solution on every tested instance. Table~\
 
 \begin{table}[H]
   \centering
-  \caption{Range CPLEX performance: mean solve time (seconds) over all densities and instances.}
+  \caption{Range CPLEX performance: mean and median solve time (seconds) over all densities and instances. Sizes $12\times12$ and $15\times15$ were added in a scaling extension.}
   \label{tab:range_summary}
-  \begin{tabular}{lrr}
+  \begin{tabular}{lrrrrrr}
     \toprule
-    Grid size & Flow (mean / max) & Callback (mean / max) \\
+    Grid size & N & Flow mean & Flow median & Callback mean & Callback median & Speedup \\
     \midrule
-    $5  \times 5$  & 0.017\,s / 0.037\,s & 0.003\,s / 0.005\,s \\
-    $7  \times 7$  & 0.022\,s / 0.040\,s & 0.006\,s / 0.007\,s \\
-    $10 \times 8$  & 0.030\,s / 0.050\,s & 0.014\,s / 0.024\,s \\
-    $10 \times 10$ & 0.030\,s / 0.046\,s & 0.022\,s / 0.085\,s \\
+    $5  \times 5$   & 30 & 0.018 & 0.015 & 0.0024 & 0.0020 & $7.5\times$ \\
+    $7  \times 7$   & 30 & 0.023 & 0.022 & 0.0058 & 0.0060 & $4.0\times$ \\
+    $9  \times 6$   & 32 & 0.023 & 0.022 & 0.0085 & 0.0080 & $2.7\times$ \\
+    $10 \times 8$   & 30 & 0.030 & 0.027 & 0.0179 & 0.0140 & $1.7\times$ \\
+    $10 \times 10$  & 30 & 0.029 & 0.026 & 0.0260 & 0.0190 & $1.1\times$ \\
+    $12 \times 12$  & 15 & 0.161 & 0.040 & 0.0620 & 0.0210 & $2.6\times$ \\
+    $15 \times 15$  & 15 & 0.084 & 0.080 & 0.0473 & 0.0420 & $1.8\times$ \\
     \bottomrule
   \end{tabular}
 \end{table}
 
-The callback strategy is consistently \textbf{2$\times$ to 6$\times$ faster} than the flow formulation across all instance classes. This improvement stems directly from the tighter LP relaxation: removing the Big-M flow variables allows CPLEX to prune branches more aggressively. Both approaches remain well within the 60-second time limit even on the largest tested instances.
+The callback formulation is faster on average across every instance class. The size-dependent speedup is non-monotone but broadly trends downward as the instances grow, shrinking from $\sim 7.5\times$ at $5 \times 5$ to $\sim 1.1\times$ at $10 \times 10$, before bouncing back up to $2.6\times$ at $12 \times 12$ where the flow's Big-M LP relaxation again drags. The callback's advantage comes from the tighter LP relaxation (no Big-M); on small instances the LP relaxation dominates the wall-clock cost, so the win is dramatic. As instances grow, integer search dominates both formulations, and the gap narrows. Both approaches remain well within the 60-second time limit on every tested instance.
 
-Importantly, neither solve time grows significantly with instance size in our test range ($5 \times 5$ to $10 \times 10$). This suggests that Range instances at these sizes are easily solvable by CPLEX, and the bottleneck is the solver overhead rather than the combinatorial complexity. Larger grids would be needed to stress-test the scalability.
+The data also contradicts the intuition that ``solve time is flat in size'': mean callback time grows from $0.002$\,s ($5 \times 5$) to $0.062$\,s ($12 \times 12$)---a $\sim 30\times$ jump---and the variance widens enough that mean and median diverge meaningfully at $12 \times 12$ (flow mean 0.161\,s vs.\ median 0.040\,s, indicating a long-tailed distribution with a few hard instances dominating the average).
 
 \subsubsection{Heuristic}
 
-The heuristic solves almost no instances. The only exceptions are a handful of $10 \times 8$ and $5 \times 5$ instances with high clue density ($d = 0.7$), which are solved instantly. On all other instances, the 10-second time limit is reached without finding a valid solution.
+The heuristic succeeds on $11/202$ instances. The successes are highly concentrated:
 
-This failure mode is expected: the Range visibility constraint is non-local (a ray spans the full grid width), and without backtracking or randomisation the propagation heuristic cannot resolve conflicts arising from the global structure. Connectivity verification further constrains the search space in ways the local heuristic cannot reason about.
+\begin{itemize}
+  \item Every success has clue density $d \in \{0.5, 0.7\}$; \textbf{not a single $d = 0.3$ instance is solved}.
+  \item $8/11$ successes are at $d = 0.7$. Higher clue density gives the visibility-equality propagation more pivots to fire on.
+  \item All successes occur at sizes $\leq 9 \times 6$; $10 \times 10$, $12 \times 12$, and $15 \times 15$ instances are uniformly unsolved.
+\end{itemize}
+
+This is consistent with the heuristic's mechanics: visibility constraints can only force a cell black when the count is already saturated in some direction, which requires sufficiently many clue cells to provide that count. With sparse clues there is too little local information for propagation to make progress, and unlike Mosaic there is no random fallback (the connectivity rule makes random fills almost surely invalid).
 
 \subsubsection{Impact of Clue Density}
 
-Varying the clue density between 0.3 and 0.7 does not significantly change CPLEX performance. Instances with fewer clues (low density) are structurally under-constrained and may admit many solutions, but this does not slow CPLEX since it needs only one feasible point. The heuristic is slightly more likely to succeed on high-density instances (more constraints to propagate from), but this effect is minor.
+For CPLEX, varying clue density between $0.3$ and $0.7$ has only a minor effect on solve time (within a factor of $\sim 1.5\times$ across densities at any fixed size). For the heuristic, density is decisive: lower density shifts the heuristic from ``occasionally solves'' to ``never solves''.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\linewidth]{../range/res/performance.pdf}
+  \caption{Cumulative number of Range instances solved within a given time budget. The flow and callback CPLEX curves are both vertical (every instance solved); their separation along the $x$-axis matches the speedups of Table~\ref{tab:range_summary}. The heuristic curve plateaus very early at $11/202$.}
+  \label{fig:range_perf}
+\end{figure}

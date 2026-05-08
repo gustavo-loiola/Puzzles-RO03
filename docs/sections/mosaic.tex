@@ -92,11 +92,27 @@ CPLEX finds a feasible solution on every instance without exception. Solve times
   \end{tabular}
 \end{table}
 
-The ILP formulation is so tightly constrained (each binary variable appears in at most nine clue constraints) that CPLEX almost always solves the LP relaxation at the root node and never needs to branch. Solve times are flat across all densities and remain well under 0.5 seconds even for $20 \times 20$ grids.
+The ILP formulation is so tightly constrained (each binary variable appears in at most nine clue constraints) that CPLEX almost always solves the LP relaxation at the root node and never needs to branch. Solve times stay below $0.05$\,s on average across all sizes and densities, with one notable exception: $20 \times 20$ grids at moderate density $d = 0.5$ (mean $0.13$\,s, max $0.38$\,s)---roughly an order of magnitude slower than the other density slices.
 
 \subsubsection{Heuristic}
 
-The heuristic solves small instances ($\leq 5 \times 5$) instantly through pure propagation. On larger instances with low clue density ($d = 0.3$), propagation typically stalls due to insufficient local information, and the random-guess fallback rarely produces a valid solution within the 10-second limit. This is an inherent limitation: without backtracking, a pure propagation heuristic cannot guarantee completeness.
+The heuristic's behaviour is more nuanced than ``small grids: easy, large: stuck''. The aggregate success rate is $78/240$ across the dataset, but the failure pattern is informative:
+
+\begin{itemize}
+  \item \textbf{$3 \times 3$ and $5 \times 5$ at low density} ($d \leq 0.5$) are solved in $100\%$ of cases, mostly in microseconds.
+  \item \textbf{$5 \times 5$ at high density} is significantly harder: $d = 0.7$ solves $8/10$ and $d = 0.9$ only $4/10$, with mean times around $1$--$2$\,s as the random-guess fallback gets re-rolled.
+  \item \textbf{$7 \times 7$ at $d = 0.3$} unexpectedly recovers $3/10$ instances---low density gives the propagation room to identify forced cells in narrow corridors before the random fallback kicks in.
+  \item \textbf{$\geq 10 \times 10$} is uniformly hopeless ($0/40$ at every density).
+\end{itemize}
+
+The takeaway is that propagation alone is competitive only when the puzzle is small \emph{and} sparse enough for forced-move chains to cover most cells. Higher densities push the heuristic into its random-fallback regime, where success becomes a lottery; backtracking would close most of these gaps, at the cost of a much longer implementation.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\linewidth]{../mosaic/res/performance.pdf}
+  \caption{Cumulative number of Mosaic instances solved within a given time budget, per method. Both curves rise nearly vertically: CPLEX solves the entire dataset in well under a second, while the heuristic plateau reflects the $\sim$1/3 success rate.}
+  \label{fig:mosaic_perf}
+\end{figure}
 
 \subsubsection{Discussion}
 

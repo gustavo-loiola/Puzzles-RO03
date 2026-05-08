@@ -1,3 +1,8 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage[a4paper, margin=2cm]{geometry}
+\begin{document}
 \begin{table}[h]
 \centering
 \begin{tabular}{lrrrr}
@@ -5,12 +10,33 @@
 Instance & \multicolumn{2}{c}{CPLEX} & \multicolumn{2}{c}{Heuristic} \\
           & Time (s) & Optimal? & Time (s) & Feasible? \\
 \midrule
-instance\_10x10\_1 & 1.941 & Y & 7.153e-6 & N \\
-instance\_15x15\_1 & 0.8752 & Y & 1.693e-5 & N \\
-instance\_4x4\_1 & 0.001219 & Y & 3.099e-6 & Y \\
-instance\_5x5\_1 & 0.00169 & Y & 3.099e-6 & Y \\
-instance\_7x7\_1 & 0.002121 & Y & 7.868e-6 & N \\
+galaxies\_10x10\_1 & 2.538 & Y & 0.0 & Y \\
+galaxies\_10x10\_2 & 0.004 & Y & 0.0 & N \\
+galaxies\_10x10\_3 & 0.003 & Y & 0.0 & Y \\
+galaxies\_15x15\_2 & 0.093 & Y & 0.0 & N \\
+galaxies\_15x15\_3 & 0.005 & Y & 0.0009999 & Y \\
+galaxies\_4x4\_1 & 0.003 & Y & 0.0 & Y \\
+galaxies\_4x4\_2 & 0.004 & Y & 0.0 & Y \\
+galaxies\_4x4\_3 & 0.002 & Y & 0.0 & Y \\
+galaxies\_5x5\_1 & 0.003 & Y & 0.0 & N \\
+galaxies\_5x5\_2 & 0.002 & Y & 0.0 & N \\
+galaxies\_5x5\_3 & 0.002 & Y & 0.0 & N \\
+galaxies\_6x6\_1 & 0.002 & Y & 0.0 & Y \\
+galaxies\_6x6\_2 & 0.003 & Y & 0.0 & Y \\
+galaxies\_6x6\_3 & 0.004 & Y & 0.0 & N \\
+galaxies\_7x7\_1 & 0.005 & Y & 0.0 & N \\
+galaxies\_7x7\_2 & 0.003 & Y & 0.0 & Y \\
+galaxies\_7x7\_3 & 0.007 & Y & 0.0 & N \\
+galaxies\_8x8\_1 & 0.011 & Y & 0.0 & N \\
+galaxies\_8x8\_2 & 0.002 & Y & 0.0 & N \\
+galaxies\_8x8\_3 & 0.004 & Y & 0.0 & N \\
+instance\_10x10\_1 & 0.023 & Y & 0.0 & N \\
+instance\_15x15\_1 & 0.504 & Y & 0.0 & N \\
+instance\_4x4\_1 & 0.002 & Y & 0.0 & Y \\
+instance\_5x5\_1 & 0.002 & Y & 0.0 & Y \\
+instance\_7x7\_1 & 0.005 & Y & 0.0 & N \\
 \bottomrule
 \end{tabular}
 \label{tab:galaxies-results}
 \end{table}
+\end{document}

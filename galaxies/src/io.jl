@@ -1,6 +1,10 @@
 # io.jl
-# Input/output utilities for the Galaxies puzzle:
-# reading instance files, displaying grids and solutions, and generating LaTeX result tables.
+# Input/output utilities and coordinate-geometry helpers for the Galaxies puzzle:
+# reading instance files, displaying grids and solutions, generating LaTeX result tables,
+# and the doubled-coordinate helpers shared by generation.jl and resolution.jl.
+
+using Plots
+import GR
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Instance file format (double-grid coordinates)
@@ -213,6 +217,88 @@ end
 
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Coordinate-geometry helpers (doubled-grid, cell centre at (2i-1, 2j-1))
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    cells_touched_by_dot(dr, dc, n, m) -> Vector{Tuple{Int,Int}}
+
+Return the grid cells (row, col) that a dot at double-grid position (dr, dc) touches.
+Touches 1, 2, or 4 cells depending on the parity of dr and dc.
+"""
+function cells_touched_by_dot(dr::Int, dc::Int, n::Int, m::Int)
+    rows = iseven(dr) ? [dr÷2, dr÷2 + 1] : [(dr+1)÷2]
+    cols = iseven(dc) ? [dc÷2, dc÷2 + 1] : [(dc+1)÷2]
+    return [(r, c) for r in rows, c in cols if 1 <= r <= n && 1 <= c <= m]
+end
+
+
+"""
+    sym_cell(i, j, dr, dc, n, m) -> Union{Tuple{Int,Int}, Nothing}
+
+180°-symmetric image of cell (i,j) about dot (dr, dc). Cell (i,j)'s centre
+is at double-grid (2i-1, 2j-1); the symmetric centre is (2dr-(2i-1), 2dc-(2j-1)),
+i.e. cell (dr-i+1, dc-j+1). Returns `nothing` if the image is outside the grid.
+"""
+function sym_cell(i::Int, j::Int, dr::Int, dc::Int, n::Int, m::Int)
+    si = dr - i + 1
+    sj = dc - j + 1
+    return (1 <= si <= n && 1 <= sj <= m) ? (si, sj) : nothing
+end
+
+
+"""
+    grid_neighbors(i, j, n, m) -> Vector{Tuple{Int,Int}}
+
+4-connected neighbours of (i,j) inside the grid.
+"""
+function grid_neighbors(i::Int, j::Int, n::Int, m::Int)
+    nb = Tuple{Int,Int}[]
+    i > 1 && push!(nb, (i-1, j))
+    i < n && push!(nb, (i+1, j))
+    j > 1 && push!(nb, (i, j-1))
+    j < m && push!(nb, (i, j+1))
+    return nb
+end
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Instance / solution writers
+# ─────────────────────────────────────────────────────────────────────────────
+
+"""
+    saveInstance(path, n, m, dots)
+
+Write a Galaxies instance (header + dots) to `path` in the project's standard format.
+"""
+function saveInstance(path::String, n::Int, m::Int, dots::Vector{Tuple{Int,Int}})
+    open(path, "w") do f
+        println(f, "# Double-grid coordinates: cell (i,j) has centre at (2i-1, 2j-1)")
+        println(f, "$n $m")
+        println(f, "# dots")
+        for (dr, dc) in dots
+            println(f, "$dr $dc")
+        end
+    end
+end
+
+
+"""
+    writeSolution(fout, assignment)
+
+Write a galaxy-assignment matrix (rows of integers, one row per line) to `fout`.
+Used by `solveDataSet()` so that result files contain a recoverable solution
+in addition to `solveTime` / `isOptimal`.
+"""
+function writeSolution(fout::IO, assignment::Matrix{Int})
+    n, m = size(assignment)
+    for i in 1:n
+        println(fout, join(assignment[i, :], " "))
+    end
+end
+
+
 """
     resultsArray(outputFile)
 
@@ -226,6 +312,11 @@ function resultsArray(outputFile::String)
                                        readdir(resultFolder * f)) for f in folderName]...))
 
     open(outputFile, "w") do fout
+        println(fout, raw"""\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{booktabs}
+\usepackage[a4paper, margin=2cm]{geometry}
+\begin{document}""")
         println(fout, "\\begin{table}[h]")
         println(fout, "\\centering")
         println(fout, "\\begin{tabular}{l" * repeat("rr", length(folderName)) * "}")
@@ -254,6 +345,59 @@ function resultsArray(outputFile::String)
         println(fout, "\\end{tabular}")
         println(fout, "\\label{tab:galaxies-results}")
         println(fout, "\\end{table}")
+        println(fout, "\\end{document}")
     end
     println("LaTeX table written to $outputFile")
+end
+
+
+"""
+    performanceDiagram(outputFile)
+
+Plot a cumulative performance diagram across the methods found in `../res/`.
+For each method one curve is drawn: x-axis is solve time, y-axis is the number
+of instances that method has solved within that time budget.
+"""
+function performanceDiagram(outputFile::String)
+    resultFolder = "../res/"
+    methods = filter(f -> isdir(resultFolder * f), readdir(resultFolder))
+    isempty(methods) && (println("No method subfolders in $resultFolder"); return)
+
+    times_per_method = Dict{String, Vector{Float64}}()
+    maxTime = 0.0
+
+    for method in methods
+        ts = Float64[]
+        for f in filter(x -> endswith(x, ".txt"), readdir(resultFolder * method))
+            content = read(joinpath(resultFolder, method, f), String)
+            mo = match(r"isOptimal\s*=\s*(\S+)", content)
+            mt = match(r"solveTime\s*=\s*([0-9.eE+\-]+)", content)
+            (mo === nothing || mt === nothing) && continue
+            strip(mo[1]) == "true" || continue
+            t = parse(Float64, mt[1])
+            push!(ts, t)
+            t > maxTime && (maxTime = t)
+        end
+        sort!(ts)
+        times_per_method[method] = ts
+    end
+
+    maxTime = max(maxTime, 1e-6)
+    plt = plot(xaxis = "Time (s)", yaxis = "Solved instances",
+               legend = :bottomright, xlim = (0, maxTime * 1.05))
+    for method in methods
+        ts = times_per_method[method]
+        isempty(ts) && continue
+        # Step curve: at each ts[i] the count jumps from i-1 to i
+        x = Float64[0.0]
+        y = Float64[0.0]
+        for (i, t) in enumerate(ts)
+            push!(x, t); push!(y, i - 1)   # vertical riser stays at previous count up to t
+            push!(x, t); push!(y, i)       # then steps up to i
+        end
+        push!(x, maxTime); push!(y, length(ts))
+        plot!(plt, x, y, label = method, linewidth = 3)
+    end
+    savefig(plt, outputFile)
+    println("Performance diagram written to $outputFile")
 end
