@@ -4,40 +4,150 @@
 \subsection{Puzzle Description}
 
 Galaxies is played on an $n \times m$ grid containing a set of dots called \emph{galaxy centres}. The goal is to partition every cell of the grid into connected regions such that:
-
 \begin{enumerate}
-  \item \textbf{One centre per region} — each region contains exactly one dot.
-  \item \textbf{180° rotational symmetry} — every region must be rotationally symmetric about its dot (i.e., for every cell $(i,j)$ in region $k$ with centre $(c_r^k, c_c^k)$, the cell $(2c_r^k - i,\; 2c_c^k - j)$ must also belong to region $k$).
-  \item \textbf{Connected regions} — each region must form a 4-connected set of cells.
-  \item \textbf{Full partition} — every cell belongs to exactly one region.
+  \item \textbf{One centre per region:} each region contains exactly one dot.
+  \item \textbf{180° rotational symmetry:} every region must be rotationally symmetric about its dot (i.e., for every cell $(i,j)$ in region $k$ with centre $(c_r^k, c_c^k)$, the cell $(2c_r^k - i,\; 2c_c^k - j)$ must also belong to region $k$).
+  \item \textbf{Connected regions:} each region must form a 4-connected set of cells.
+  \item \textbf{Full partition:} every cell belongs to exactly one region.
 \end{enumerate}
 
-Galaxy centres can lie on cell centres, on edge midpoints, or on vertex intersections of the grid, making the symmetry axis non-integer in general. This puzzle is rated difficulty 9, the highest in the project, because the connectivity constraint (Rule 3) for each region cannot be encoded with a polynomial number of linear inequalities upfront.
+Galaxy centres can lie on cell centres, on edge midpoints, or on vertex intersections of the grid, making the symmetry axis non-integer in general. This puzzle is rated difficulty 9, the highest in the project, because the connectivity constraint (Rule 4) for each region cannot be encoded with a polynomial number of linear inequalities upfront.
 
 \subsection{ILP Formulation}
-
-% TODO
+ 
+The objective is pure feasibility: any assignment satisfying all constraints is a valid solution. We therefore use a constant objective of $0$, or alternatively minimize a perimeter cost to bias CPLEX toward compact galaxies and break ties faster.
 
 \subsubsection{Sets and Decision Variables}
 
-% TODO
+We use a \emph{double-grid} coordinate system: the centre of cell $(i,j)$ is placed at double-grid point $(2i-1,\, 2j-1)$, so coordinates range over $\{1,\ldots,2n-1\}\times\{1,\ldots,2m-1\}$. A dot at double-grid position $(d_r^k, d_c^k)$ may sit at a cell centre (both odd), a horizontal edge (even row, odd column), a vertical edge (odd row, even column), or a grid corner (both even), touching 1, 2, 2, or 4 cells respectively.
+
+\medskip
+\begin{center}
+\begin{tabular}{llcc}
+\toprule
+Set / Parameter & Description \\
+\midrule
+$\mathcal{C} = \{1,\ldots,n\}\times\{1,\ldots,m\}$ & set of grid cells \\
+$K$ & number of galaxies (dots) \\
+$(d_r^k, d_c^k)$ & double-grid position of dot $k$ \\
+$A^k$ & cells touched by dot $k$ (anchor cells) \\
+$\sigma_k(i,j)$ & 180°-symmetric image of $(i,j)$ with respect to dot $k$ \\
+$E_{ij}$ & galaxies $k$ for which $\sigma_k(i,j)\in\mathcal{C}$ (eligible set) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip\noindent
+The symmetric image is computed in double-grid coordinates. Letting
+$\tilde{i} = 2i-1$ and $\tilde{j} = 2j-1$ denote the double-grid centre of cell $(i,j)$,
+its symmetric counterpart w.r.t.\ dot $k$ is at double-grid position
+\[
+  \bigl(2d_r^k - \tilde{i},\; 2d_c^k - \tilde{j}\bigr)
+\]
+and corresponds to a valid cell only when both coordinates are odd
+(i.e.\ land on a cell centre) and lie within the grid bounds.
+
+\medskip
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+Variable & Domain & Meaning \\
+\midrule
+$x_{ijk}$ & $\{0,1\}$ & 1 iff cell $(i,j)$ belongs to galaxy $k$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent Variables $x_{ijk}$ are only created when $k \in E_{ij}$, i.e.\ when the symmetric counterpart of $(i,j)$ for galaxy $k$ lies inside the grid. This sparse representation significantly reduces the model size.
 
 \subsubsection{Constraints}
 
-% TODO
+\paragraph{R1 — Partition.} Every cell belongs to exactly one galaxy:
+\[
+  \sum_{k \in E_{ij}} x_{ijk} = 1
+  \qquad
+  \forall\,(i,j)\in\mathcal{C}
+\]
+
+\paragraph{R2 — Dot anchor.} Every cell touched by dot $k$ must belong to galaxy $k$:
+\[
+  x_{ijk} = 1
+  \qquad
+  \forall\,k\in\{1,\ldots,K\},
+  \;
+  \forall\,(i,j)\in A^k
+\]
+
+\paragraph{R3 — Symmetry.} For each galaxy $k$, a cell and its symmetric image must receive the same assignment:
+\[
+  x_{ijk} = x_{\sigma_k(i,j),\,k}
+  \qquad
+  \forall\,k,
+  \;
+  \forall\,(i,j)\in\mathcal{C}
+  \text{ with }
+  \sigma_k(i,j)\in\mathcal{C}
+\]
+If $\sigma_k(i,j)\notin\mathcal{C}$, the variable $x_{ijk}$ is fixed to 0 (ineligibility).
+
+\paragraph{R4 — Connectivity.} Each galaxy must form a 4-connected region. This constraint is enforced via lazy cuts (see Section~\ref{sec:connectivity}) rather than upfront constraints.
+
+\paragraph{Constraint propagation.} Before building the model, we run a propagation pass: any cell $(i,j)$ with $|E_{ij}|=1$ is immediately fixed to its unique eligible galaxy, and this fixation is propagated to the symmetric counterpart, which may in turn reduce other eligible sets. This preprocessing step often eliminates a large fraction of binary variables.
 
 \subsection{Connectivity via Lazy-Constraint Callbacks}
+\label{sec:connectivity}
 
-% TODO
+Connectivity (R4) cannot be expressed with a polynomial number of upfront linear constraints. Two standard approaches exist:
+
+\begin{itemize}
+  \item \textbf{Flow variables.} Introduce flow variables $f_{(i,j)\to(i',j'),k}$ representing commodity flow from the anchor of galaxy $k$ to each of its cells. Flow conservation forces reachability, but adds $O(n\cdot m\cdot K)$ variables and constraints upfront, which becomes prohibitive for large $K$.
+
+  \item \textbf{Lazy-constraint callback (used here).} Constraints R1--R3 are encoded upfront. Each time CPLEX finds an integer-feasible solution, a callback verifies connectivity via BFS from each galaxy's anchor. For any disconnected component $S$ of galaxy $k$, the following separator cut is added as a lazy constraint:
+  \[
+    \sum_{(i,j)\in S} x_{ijk}
+    \;+\;
+    \sum_{(u,v)\in N(S)} \bigl(1 - x_{uvk}\bigr)
+    \;\geq\;
+    1
+  \]
+  where $N(S)$ is the set of grid cells adjacent to $S$ but not contained in $S$. This forces either $S$ to dissolve or some bridge cell from $N(S)$ to join galaxy $k$. CPLEX then rejects the solution and resumes the branch-and-cut process with the new constraint.
+\end{itemize}
+
+The callback approach keeps the model compact and adds cuts only when necessary, which is critical given the large number of galaxies $K$ in bigger instances.
 
 \subsection{Instance Generation}
 
-% TODO
+TODO
 
 \subsection{Heuristic Solver}
 
-% TODO
+The heuristic provides a warm start for CPLEX by producing a possibly partial feasible assignment without invoking the ILP solver. It proceeds in three phases:
+
+\begin{enumerate}
+  \item \textbf{Propagation seed.} All cells with $|E_{ij}|=1$ (a single eligible galaxy after constraint propagation) are immediately assigned. Symmetric counterparts are assigned simultaneously to maintain R3.
+
+  \item \textbf{BFS frontier expansion.} Each galaxy grows outward from its already assigned cells, assigning unassigned neighbours together with their symmetric counterparts whenever possible.
+
+  \item \textbf{Final sweep.} Any remaining unassigned cells are greedily assigned to the first eligible galaxy for which both the cell and its symmetric image are still free.
+\end{enumerate}
+
+When the heuristic finds a fully feasible assignment, it is fed to CPLEX as a MIP start via \texttt{set\_start\_value}, significantly reducing the time required to find the first integer-feasible solution. Even partial assignments are passed to CPLEX, since incomplete MIP starts are also accepted.
 
 \subsection{Results}
 
-% TODO
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrr}
+\toprule
+Instance & \multicolumn{2}{c}{CPLEX} & \multicolumn{2}{c}{Heuristic} \\
+          & Time (s) & Optimal? & Time (s) & Feasible? \\
+\midrule
+instance\_4x4\_1 & 0.001082 & Y & 2.146e-6 & Y \\
+instance\_5x5\_1 & 0.000855 & Y & 3.099e-6 & Y \\
+instance\_7x7\_1 & 0.001808 & Y & 5.96e-6 & N \\
+instance\_10x10\_1 & 1.955 & Y & 8.106e-6 & N \\
+instance\_15x15\_1 & 0.7639 & Y & 1.693e-5 & N \\
+\bottomrule
+\end{tabular}
+\label{tab:galaxies-results}
+\end{table}
