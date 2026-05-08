@@ -226,19 +226,23 @@ function resultsArray(outputFile::String)
                                        readdir(resultFolder * f)) for f in folderName]...))
 
     open(outputFile, "w") do fout
-        println(fout, "\\documentclass{article}\n\\usepackage{booktabs}\n\\begin{document}")
+        println(fout, "\\begin{table}[h]")
+        println(fout, "\\centering")
         println(fout, "\\begin{tabular}{l" * repeat("rr", length(folderName)) * "}")
         println(fout, "\\toprule")
-        println(fout, "Instance" * join([" & \\multicolumn{2}{c}{$f}" for f in folderName]) * " \\\\")
-        println(fout, join(["& Time (s) & Opt?" for _ in folderName]) * " \\\\\\midrule")
+        println(fout, "Instance" * join([" & \\multicolumn{2}{c}{$(f == "cplex" ? "CPLEX" : "Heuristic")}" for f in folderName]) * " \\\\")
+        println(fout, "         " * join([" & Time (s) & $(f == "cplex" ? "Optimal?" : "Feasible?")" for f in folderName]) * " \\\\")
+        println(fout, "\\midrule")
 
         for inst in instances
-            row = replace(inst, "_" => "\\_")
+            row = replace(replace(inst, "_" => "\\_"), ".txt" => "")
             for method in folderName
                 path = resultFolder * method * "/" * inst
                 if isfile(path)
-                    include(path)   # defines solveTime and isOptimal
-                    row *= " & $(round(solveTime, digits=2)) & $(isOptimal ? "Y" : "N")"
+                    content = read(path, String)
+                    st = parse(Float64, match(r"solveTime\s*=\s*([0-9.eE+\-]+)", content)[1])
+                    io = strip(match(r"isOptimal\s*=\s*(\S+)", content)[1]) == "true"
+                    row *= " & $(round(st, sigdigits=4)) & $(io ? "Y" : "N")"
                 else
                     row *= " & -- & --"
                 end
@@ -246,7 +250,10 @@ function resultsArray(outputFile::String)
             println(fout, row * " \\\\")
         end
 
-        println(fout, "\\bottomrule\n\\end{tabular}\n\\end{document}")
+        println(fout, "\\bottomrule")
+        println(fout, "\\end{tabular}")
+        println(fout, "\\label{tab:galaxies-results}")
+        println(fout, "\\end{table}")
     end
     println("LaTeX table written to $outputFile")
 end

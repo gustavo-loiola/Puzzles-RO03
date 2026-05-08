@@ -511,8 +511,9 @@ function solveDataSet()
         # Heuristic
         h_path = resFolder * "heuristique/" * file
         if !isfile(h_path)
+            _, _, eligible = precompute(n, m, dots)
             t0 = time()
-            h_ok, h_assign = heuristicSolve(n, m, dots)
+            h_ok, h_assign = heuristicSolve(n, m, dots, eligible)
             h_time = time() - t0
             open(h_path, "w") do f
                 println(f, "solveTime = $h_time\nisOptimal = $h_ok")
