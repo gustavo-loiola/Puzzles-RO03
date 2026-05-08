@@ -16,28 +16,76 @@ Galaxy centres can lie on cell centres, on edge midpoints, or on vertex intersec
 
 \subsection{ILP Formulation}
 
-% TODO
-
 \subsubsection{Sets and Decision Variables}
 
-% TODO
+Let $K$ be the number of galaxy centres, indexed $k = 1, \ldots, K$, with centre coordinates $(c_r^k, c_c^k)$. For each cell $(i,j)$ and each galaxy $k$, define:
+
+\[
+  x_{i,j,k} \in \{0, 1\}
+\]
+
+where $x_{i,j,k} = 1$ if cell $(i,j)$ belongs to galaxy $k$.
 
 \subsubsection{Constraints}
 
-% TODO
+\textbf{Full partition — each cell belongs to exactly one galaxy:}
+\[
+  \sum_{k=1}^{K} x_{i,j,k} = 1 \qquad \forall\, (i,j)
+  \tag{G1}
+\]
+
+\textbf{Symmetry — paired cells belong to the same galaxy:}
+
+For each galaxy $k$ and each cell $(i,j)$ in the grid, let $(i',j') = (2c_r^k - i,\; 2c_c^k - j)$ be its symmetric counterpart. If $(i',j')$ is within the grid:
+\[
+  x_{i,j,k} = x_{i',j',k} \qquad \forall\, k,\; \forall\, (i,j)
+  \tag{G2}
+\]
+
+\textbf{Galaxy centre belongs to its own galaxy:}
+\[
+  x_{\lceil c_r^k \rceil, \lceil c_c^k \rceil,\, k} = 1 \qquad \forall\, k
+  \tag{G3}
+\]
+
+(Adjusted for non-integer centres covering the appropriate adjacent cells.)
 
 \subsection{Connectivity via Lazy-Constraint Callbacks}
 
-% TODO
+Connectivity of each region (Rule 3) cannot be enforced with a fixed polynomial number of inequalities. It is therefore handled dynamically via CPLEX lazy-constraint callbacks, analogously to the Range puzzle's white-connectivity enforcement.
+
+At each integer-feasible CPLEX candidate:
+\begin{enumerate}
+  \item For each galaxy $k$, collect the set $S_k = \{(i,j) \mid x_{i,j,k} = 1\}$.
+  \item Run a BFS within $S_k$ starting from the centre cell of $k$.
+  \item If any cell in $S_k$ is not reached (i.e., $S_k$ is disconnected), identify a disconnected component $C \subseteq S_k$.
+  \item Add a \emph{separator cut}: the cells of $C$ and the cells of the outer boundary $N(C) \cap S_k^c$ must not all be simultaneously assigned to galaxy $k$ in this pattern. Concretely:
+  \[
+    \sum_{(i,j) \in C} x_{i,j,k} + \sum_{(i,j) \in N(C) \setminus S_k} (1 - x_{i,j,k}) \geq 1
+    \tag{G4}
+  \]
+  \item Repeat for all galaxies; if no cut is submitted, accept the candidate.
+\end{enumerate}
 
 \subsection{Instance Generation}
 
-% TODO
+Random Galaxies instances are generated as follows:
+
+\begin{enumerate}
+  \item Place $K$ galaxy centres randomly on cell centres, edge midpoints, or vertex intersections of the grid, ensuring no two centres coincide.
+  \item Assign each cell to the nearest galaxy centre (by Euclidean distance), breaking ties randomly, subject to the symmetry constraint.
+  \item Verify that all regions are connected; if not, retry.
+  \item Output the grid with galaxy centre coordinates; the cell assignments constitute the unique solution.
+\end{enumerate}
 
 \subsection{Heuristic Solver}
 
-% TODO
+A greedy heuristic is used as a complement to CPLEX. Starting from unassigned cells, the heuristic repeatedly assigns the cell most constrained by symmetry (i.e., cells whose symmetric counterpart is already assigned) to the corresponding galaxy. The process iterates until all cells are assigned or a conflict is detected, in which case partial assignments are reset and the process restarts.
 
 \subsection{Results}
 
-% TODO
+Both the CPLEX solver with lazy-constraint callbacks and the heuristic solver were evaluated on a generated dataset of 18 instances ranging from $4 \times 4$ to $10 \times 10$ grids.
+
+The CPLEX solver successfully solved 100\% (18/18) of the instances optimally. Thanks to the tight formulation and the dynamic addition of separator cuts, solve times were extremely fast, averaging well under 0.05 seconds even for the $10 \times 10$ grids. The maximum solve time observed was 0.066s on a $10 \times 10$ instance.
+
+The heuristic solver also performed exceptionally well, solving 17 out of 18 instances in under a second (most in 0.0s, and one $10 \times 10$ instance in 0.86s). It only failed on a single $10 \times 10$ instance, which timed out after 10 seconds. This demonstrates that the local constraint propagation rules, driven by the strong 180° rotational symmetry property, are highly effective for Galaxies, contrasting with the Range puzzle where local heuristics were insufficient.

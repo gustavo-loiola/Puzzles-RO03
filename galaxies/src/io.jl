@@ -1,342 +1,218 @@
-# This file contains functions related to reading, writing and displaying a grid and experimental results
-
-using JuMP
-using Plots
-import GR
+# ─────────────────────────────────────────────────────────────────────────────
+#  io.jl — I/O, display and reporting utilities for the Galaxies puzzle
+# ─────────────────────────────────────────────────────────────────────────────
 
 """
-Read an instance from an input file
+Read a Galaxies instance from a text file.
 
-- Argument:
-inputFile: path of the input file
+Expected format:
+    m n                       ← grid dimensions (columns, rows)
+    p1 q1                     ← dot positions in doubled coordinates
+    p2 q2
+    ...
+    # solution                ← optional section
+    k11 k12 k13 ...          ← galaxy index per cell, row by row
+    k21 k22 k23 ...
+    ...
+
+Returns:
+- grid:     tuple (n, m) — number of rows and columns
+- dots:     Vector{Tuple{Int,Int}} — dot positions (p, q) in doubled coords
+- solution: n×m Matrix{Int} of galaxy indices, or `nothing` if absent
 """
-function readInputFile(inputFile::String)
+function readInputFile(path::String)
 
-    # Open the input file
-    datafile = open(inputFile)
+    lines = readlines(path)
+    idx = 1
 
-    data = readlines(datafile)
-    close(datafile)
-
-    # For each line of the input file
-    for line in data
-
-        # TODO
-        println("In file io.jl, in method readInputFile(), TODO: read a line of the input file")
-
+    # Skip leading blanks / comments
+    while idx <= length(lines) &&
+          (isempty(strip(lines[idx])) || startswith(strip(lines[idx]), "#"))
+        idx += 1
     end
 
+    # ── Dimensions ───────────────────────────────────────────────────────
+    parts = split(strip(lines[idx]))
+    m_cols = parse(Int, parts[1])
+    n_rows = parse(Int, parts[2])
+    idx += 1
+
+    # ── Dot positions ────────────────────────────────────────────────────
+    dots = Tuple{Int,Int}[]
+    while idx <= length(lines)
+        line = strip(lines[idx])
+        if isempty(line) || startswith(line, "#")
+            idx += 1
+            # If we hit "# solution", break to read it next
+            if startswith(line, "# solution")
+                break
+            end
+            continue
+        end
+        tokens = split(line)
+        if length(tokens) == 2
+            p = parse(Int, tokens[1])
+            q = parse(Int, tokens[2])
+            push!(dots, (p, q))
+            idx += 1
+        else
+            break   # more than 2 tokens → probably solution section
+        end
+    end
+
+    # ── Optional solution ────────────────────────────────────────────────
+    solution = nothing
+
+    # Advance past blank lines / "# solution" header
+    while idx <= length(lines) &&
+          (isempty(strip(lines[idx])) || startswith(strip(lines[idx]), "#"))
+        idx += 1
+    end
+
+    if idx <= length(lines)
+        solution = fill(0, n_rows, m_cols)
+        row = 1
+        while idx <= length(lines) && row <= n_rows
+            line = strip(lines[idx])
+            if isempty(line) || startswith(line, "#")
+                idx += 1
+                continue
+            end
+            tokens = split(line)
+            for j in 1:m_cols
+                solution[row, j] = parse(Int, tokens[j])
+            end
+            row += 1
+            idx += 1
+        end
+        if row <= n_rows
+            solution = nothing      # incomplete solution data
+        end
+    end
+
+    return (n_rows, m_cols), dots, solution
 end
 
 
 """
-Create a pdf file which contains a performance diagram associated to the results of the ../res folder
-Display one curve for each subfolder of the ../res folder.
+Display the grid with dot positions in a text representation.
 
-Arguments
-- outputFile: path of the output file
-
-Prerequisites:
-- Each subfolder must contain text files
-- Each text file correspond to the resolution of one instance
-- Each text file contains a variable "solveTime" and a variable "isOptimal"
+Uses a (2n+1) × (2m+1) character grid. Cell interiors are shown as ` `,
+dots as `●` (or `o` if stdout does not support Unicode).
 """
-function performanceDiagram(outputFile::String)
+function displayGrid(grid, dots)
 
-    resultFolder = "../res/"
-    
-    # Maximal number of files in a subfolder
-    maxSize = 0
+    n, m = grid
+    # Build a character canvas: rows 0..2n, cols 0..2m
+    # Even rows/cols = cell boundaries, odd rows/cols = cell interiors
+    rows = 2n + 1
+    cols = 2m + 1
 
-    # Number of subfolders
-    subfolderCount = 0
+    canvas = fill(' ', rows, cols)
 
-    folderName = Array{String, 1}()
-
-    # For each file in the result folder
-    for file in readdir(resultFolder)
-
-        path = resultFolder * file
-        
-        # If it is a subfolder
-        if isdir(path)
-            
-            folderName = vcat(folderName, file)
-             
-            subfolderCount += 1
-            folderSize = size(readdir(path), 1)
-
-            if maxSize < folderSize
-                maxSize = folderSize
+    # Draw grid lines
+    for r in 1:rows
+        for c in 1:cols
+            if r % 2 == 1 && c % 2 == 1
+                canvas[r, c] = '+'
+            elseif r % 2 == 1
+                canvas[r, c] = '-'
+            elseif c % 2 == 1
+                canvas[r, c] = '|'
             end
         end
     end
 
-    # Array that will contain the resolution times (one line for each subfolder)
-    results = Array{Float64}(undef, subfolderCount, maxSize)
-
-    for i in 1:subfolderCount
-        for j in 1:maxSize
-            results[i, j] = Inf
+    # Place dots — convert doubled coords (p, q) to canvas coords
+    # Cell (i,j) centre in canvas = (2i, 2j).  Doubled coord (p,q) maps
+    # directly to canvas position (p, q) since canvas rows/cols go 1..2n+1
+    # and doubled coords go 1..2n.
+    for (p, q) in dots
+        if 1 <= p <= 2n && 1 <= q <= 2m
+            canvas[p, q] = 'o'
         end
     end
 
-    folderCount = 0
-    maxSolveTime = 0
-
-    # For each subfolder
-    for file in readdir(resultFolder)
-            
-        path = resultFolder * file
-        
-        if isdir(path)
-
-            folderCount += 1
-            fileCount = 0
-
-            # For each text file in the subfolder
-            for resultFile in filter(x->occursin(".txt", x), readdir(path))
-
-                fileCount += 1
-                include(path * "/" * resultFile)
-
-                if isOptimal
-                    results[folderCount, fileCount] = solveTime
-
-                    if solveTime > maxSolveTime
-                        maxSolveTime = solveTime
-                    end 
-                end 
-            end 
-        end
-    end 
-
-    # Sort each row increasingly
-    results = sort(results, dims=2)
-
-    println("Max solve time: ", maxSolveTime)
-
-    # For each line to plot
-    for dim in 1: size(results, 1)
-
-        x = Array{Float64, 1}()
-        y = Array{Float64, 1}()
-
-        # x coordinate of the previous inflexion point
-        previousX = 0
-        previousY = 0
-
-        append!(x, previousX)
-        append!(y, previousY)
-            
-        # Current position in the line
-        currentId = 1
-
-        # While the end of the line is not reached 
-        while currentId != size(results, 2) && results[dim, currentId] != Inf
-
-            # Number of elements which have the value previousX
-            identicalValues = 1
-
-             # While the value is the same
-            while results[dim, currentId] == previousX && currentId <= size(results, 2)
-                currentId += 1
-                identicalValues += 1
-            end
-
-            # Add the proper points
-            append!(x, previousX)
-            append!(y, currentId - 1)
-
-            if results[dim, currentId] != Inf
-                append!(x, results[dim, currentId])
-                append!(y, currentId - 1)
-            end
-            
-            previousX = results[dim, currentId]
-            previousY = currentId - 1
-            
-        end
-
-        append!(x, maxSolveTime)
-        append!(y, currentId - 1)
-
-        # If it is the first subfolder
-        if dim == 1
-
-            # Draw a new plot
-            plot(x, y, label = folderName[dim], legend = :bottomright, xaxis = "Time (s)", yaxis = "Solved instances",linewidth=3)
-
-        # Otherwise 
-        else
-            # Add the new curve to the created plot
-            savefig(plot!(x, y, label = folderName[dim], linewidth=3), outputFile)
-        end 
+    println("Grid $(n)×$(m) with $(length(dots)) galaxies:")
+    for r in 1:rows
+        println(String(canvas[r, :]))
     end
-end 
+    println()
+end
+
 
 """
-Create a latex file which contains an array with the results of the ../res folder.
-Each subfolder of the ../res folder contains the results of a resolution method.
+Display a solved grid, colouring each cell with its galaxy index.
+"""
+function displaySolution(grid, dots, solution)
 
-Arguments
-- outputFile: path of the output file
+    n, m = grid
 
-Prerequisites:
-- Each subfolder must contain text files
-- Each text file correspond to the resolution of one instance
-- Each text file contains a variable "solveTime" and a variable "isOptimal"
+    println("Solution:")
+    # Determine column width based on max galaxy index
+    maxIdx = maximum(solution)
+    w = max(2, length(string(maxIdx)) + 1)
+
+    for i in 1:n
+        for j in 1:m
+            print(lpad(string(solution[i, j]), w))
+        end
+        println()
+    end
+    println()
+end
+
+
+"""
+Write a solution matrix to an open IO stream (one row per line).
+"""
+function writeSolution(fout::IO, solution::Matrix{Int})
+    n, m = size(solution)
+    for i in 1:n
+        println(fout, join(solution[i, :], " "))
+    end
+end
+
+
+"""
+Generate a LaTeX performance‐comparison table from the result files
+in `../res/cplex/`.
 """
 function resultsArray(outputFile::String)
-    
-    resultFolder = "../res/"
+
+    resFolder  = "../res/cplex/"
     dataFolder = "../data/"
-    
-    # Maximal number of files in a subfolder
-    maxSize = 0
 
-    # Number of subfolders
-    subfolderCount = 0
+    if !isdir(resFolder)
+        println("No results folder found at $resFolder")
+        return
+    end
 
-    # Open the latex output file
     fout = open(outputFile, "w")
+    println(fout, raw"\begin{tabular}{|l|c|c|}")
+    println(fout, raw"\hline")
+    println(fout, raw"Instance & Optimal & Time (s) \\")
+    println(fout, raw"\hline")
 
-    # Print the latex file output
-    println(fout, raw"""\documentclass{article}
-
-\usepackage[french]{babel}
-\usepackage [utf8] {inputenc} % utf-8 / latin1 
-\usepackage{multicol}
-
-\setlength{\hoffset}{-18pt}
-\setlength{\oddsidemargin}{0pt} % Marge gauche sur pages impaires
-\setlength{\evensidemargin}{9pt} % Marge gauche sur pages paires
-\setlength{\marginparwidth}{54pt} % Largeur de note dans la marge
-\setlength{\textwidth}{481pt} % Largeur de la zone de texte (17cm)
-\setlength{\voffset}{-18pt} % Bon pour DOS
-\setlength{\marginparsep}{7pt} % Séparation de la marge
-\setlength{\topmargin}{0pt} % Pas de marge en haut
-\setlength{\headheight}{13pt} % Haut de page
-\setlength{\headsep}{10pt} % Entre le haut de page et le texte
-\setlength{\footskip}{27pt} % Bas de page + séparation
-\setlength{\textheight}{668pt} % Hauteur de la zone de texte (25cm)
-
-\begin{document}""")
-
-    header = raw"""
-\begin{center}
-\renewcommand{\arraystretch}{1.4} 
- \begin{tabular}{l"""
-
-    # Name of the subfolder of the result folder (i.e, the resolution methods used)
-    folderName = Array{String, 1}()
-
-    # List of all the instances solved by at least one resolution method
-    solvedInstances = Array{String, 1}()
-
-    # For each file in the result folder
-    for file in readdir(resultFolder)
-
-        path = resultFolder * file
-        
-        # If it is a subfolder
-        if isdir(path)
-
-            # Add its name to the folder list
-            folderName = vcat(folderName, file)
-             
-            subfolderCount += 1
-            folderSize = size(readdir(path), 1)
-
-            # Add all its files in the solvedInstances array
-            for file2 in filter(x->occursin(".txt", x), readdir(path))
-                solvedInstances = vcat(solvedInstances, file2)
-            end 
-
-            if maxSize < folderSize
-                maxSize = folderSize
+    for file in sort(filter(x -> occursin(".txt", x), readdir(resFolder)))
+        # Read result file
+        isOptimal = false
+        solveTime = -1.0
+        for line in readlines(resFolder * file)
+            if startswith(line, "solveTime")
+                solveTime = parse(Float64, split(line, "=")[2])
+            elseif startswith(line, "isOptimal")
+                isOptimal = parse(Bool, strip(split(line, "=")[2]))
             end
         end
+        name = replace(file, ".txt" => "")
+        opt  = isOptimal ? "Yes" : "No"
+        t    = round(solveTime, sigdigits = 3)
+        println(fout, "$name & $opt & $t \\\\")
     end
 
-    # Only keep one string for each instance solved
-    unique(solvedInstances)
-
-    # For each resolution method, add two columns in the array
-    for folder in folderName
-        header *= "rr"
-    end
-
-    header *= "}\n\t\\hline\n"
-
-    # Create the header line which contains the methods name
-    for folder in folderName
-        header *= " & \\multicolumn{2}{c}{\\textbf{" * folder * "}}"
-    end
-
-    header *= "\\\\\n\\textbf{Instance} "
-
-    # Create the second header line with the content of the result columns
-    for folder in folderName
-        header *= " & \\textbf{Temps (s)} & \\textbf{Optimal ?} "
-    end
-
-    header *= "\\\\\\hline\n"
-
-    footer = raw"""\hline\end{tabular}
-\end{center}
-
-"""
-    println(fout, header)
-
-    # On each page an array will contain at most maxInstancePerPage lines with results
-    maxInstancePerPage = 30
-    id = 1
-
-    # For each solved files
-    for solvedInstance in solvedInstances
-
-        # If we do not start a new array on a new page
-        if rem(id, maxInstancePerPage) == 0
-            println(fout, footer, "\\newpage")
-            println(fout, header)
-        end 
-
-        # Replace the potential underscores '_' in file names
-        print(fout, replace(solvedInstance, "_" => "\\_"))
-
-        # For each resolution method
-        for method in folderName
-
-            path = resultFolder * method * "/" * solvedInstance
-
-            # If the instance has been solved by this method
-            if isfile(path)
-
-                include(path)
-
-                println(fout, " & ", round(solveTime, digits=2), " & ")
-
-                if isOptimal
-                    println(fout, "\$\\times\$")
-                end 
-                
-            # If the instance has not been solved by this method
-            else
-                println(fout, " & - & - ")
-            end
-        end
-
-        println(fout, "\\\\")
-
-        id += 1
-    end
-
-    # Print the end of the latex file
-    println(fout, footer)
-
-    println(fout, "\\end{document}")
-
+    println(fout, raw"\hline")
+    println(fout, raw"\end{tabular}")
     close(fout)
-    
-end 
+    println("LaTeX table written to $outputFile")
+end
